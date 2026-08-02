@@ -1,32 +1,34 @@
 from fastapi import FastAPI
 
+from seaguard.api.routes.health import router as health_router
+from seaguard.core.config import get_settings
+
+settings = get_settings()
+
 
 app = FastAPI(
-    title="SeaGuard AI API",
+    title=settings.app_name,
     description=(
         "AI-assisted maritime vessel monitoring, "
         "anomaly detection, and collision-risk API."
     ),
     version="0.1.0",
+    debug=settings.app_debug,
 )
 
 
-@app.get("/")
+app.include_router(
+    health_router,
+    prefix="/api/v1",
+)
+
+
+@app.get("/", tags=["Root"])
 def root() -> dict[str, str]:
     """Return basic information about the API."""
 
     return {
-        "name": "SeaGuard AI API",
+        "name": settings.app_name,
         "version": "0.1.0",
         "documentation": "/docs",
-    }
-
-
-@app.get("/api/v1/health")
-def health_check() -> dict[str, str]:
-    """Confirm that the backend process is running."""
-
-    return {
-        "status": "ok",
-        "service": "seaguard-api",
     }
