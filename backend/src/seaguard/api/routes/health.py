@@ -36,13 +36,9 @@ def database_health(
     """Confirm that PostgreSQL and PostGIS are available."""
 
     try:
-        database_name = session.execute(
-            text("SELECT current_database()")
-        ).scalar_one()
+        database_name = session.execute(text("SELECT current_database()")).scalar_one()
 
-        postgis_version = session.execute(
-            text("SELECT PostGIS_Version()")
-        ).scalar_one()
+        postgis_version = session.execute(text("SELECT PostGIS_Version()")).scalar_one()
 
     except SQLAlchemyError as error:
         raise HTTPException(

@@ -18,8 +18,7 @@ data/raw/*
 data/proessed/*
 data/models/*
 
-# IDE and operating-system files
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+# VS Code workspace configuration
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
