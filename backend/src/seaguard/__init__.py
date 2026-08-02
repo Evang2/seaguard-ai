@@ -1,0 +1,2 @@
+"""SeaGuard AI backend package."""
+
