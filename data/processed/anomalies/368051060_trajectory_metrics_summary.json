@@ -1,0 +1,20 @@
+{
+  "source_file": "/home/evang/Projects/seaguard-ai/data/processed/trajectories/368051060_trajectory_metrics.csv",
+  "observations": 465,
+  "anomalous_observations": 1,
+  "total_alerts": 1,
+  "anomaly_counts": {
+    "reporting_gap": 1
+  },
+  "severity_counts": {
+    "warning": 1
+  },
+  "thresholds": {
+    "reporting_gap_minutes": 15.0,
+    "position_jump_speed_knots": 60.0,
+    "speed_difference_knots": 15.0,
+    "course_change_degrees": 90.0,
+    "heading_change_degrees": 90.0,
+    "acceleration_knots_per_minute": 2.0
+  }
+}

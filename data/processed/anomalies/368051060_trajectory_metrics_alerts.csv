@@ -1,0 +1,2 @@
+mmsi,timestamp,anomaly_type,severity,metric_name,metric_value,threshold,message
+368051060,2024-06-14 02:27:38+00:00,reporting_gap,warning,reporting_gap_minutes,30.08333333333333,15.0,"AIS reporting gap was 30.08 minutes, exceeding the 15.00-minute threshold."
