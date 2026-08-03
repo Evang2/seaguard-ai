@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.18.5",
     "fastapi[standard]>=0.141.1",
     "folium>=0.20.0",
     "geoalchemy2>=0.20.0",
