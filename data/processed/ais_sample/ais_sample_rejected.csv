@@ -1,0 +1,1 @@
+mmsi,timestamp,latitude,longitude,sog,cog,heading,vessel_name,imo,call_sign,vessel_type,navigation_status,length_m,width_m,draft_m,cargo,transceiver_class,invalid_mmsi,invalid_timestamp,invalid_latitude,invalid_longitude,sog_unavailable,sog_invalid,cog_unavailable,cog_invalid,heading_unavailable,heading_invalid,is_valid_core_record,duplicate_record
