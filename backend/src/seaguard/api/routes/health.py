@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from seaguard.db.session import get_database_session
+from seaguard.db.session import get_session
 
 router = APIRouter(
     prefix="/health",
@@ -15,7 +15,7 @@ router = APIRouter(
 
 DatabaseSession = Annotated[
     Session,
-    Depends(get_database_session),
+    Depends(get_session),
 ]
 
 
