@@ -7,6 +7,8 @@ import pandas as pd
 ALERT_COLUMNS = [
     "mmsi",
     "timestamp",
+    "latitude",
+    "longitude",
     "anomaly_type",
     "severity",
     "metric_name",
@@ -240,6 +242,18 @@ def detect_rule_based_anomalies(
         for index in annotated.index[mask]:
             metric_value = metric_values.loc[index]
 
+            latitude = (
+                annotated.at[index, "latitude"]
+                if "latitude" in annotated.columns
+                else None
+            )
+
+            longitude = (
+                annotated.at[index, "longitude"]
+                if "longitude" in annotated.columns
+                else None
+            )
+
             alerts.append(
                 {
                     "mmsi": annotated.at[index, "mmsi"],
@@ -247,6 +261,8 @@ def detect_rule_based_anomalies(
                         index,
                         "timestamp",
                     ],
+                    "latitude": (float(latitude) if pd.notna(latitude) else None),
+                    "longitude": (float(longitude) if pd.notna(longitude) else None),
                     "anomaly_type": anomaly_type,
                     "severity": severity,
                     "metric_name": metric_name,

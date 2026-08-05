@@ -110,3 +110,19 @@ class APIMessage(BaseModel):
     """Simple API status response."""
 
     message: str = Field(min_length=1)
+
+
+class AnomalyResponse(BaseModel):
+    """One stored explainable anomaly alert."""
+
+    id: int
+    mmsi: str
+    observed_at: datetime
+    latitude: float
+    longitude: float
+    anomaly_type: str
+    severity: str
+    metric_name: str
+    metric_value: float | None = None
+    threshold: float | None = None
+    message: str

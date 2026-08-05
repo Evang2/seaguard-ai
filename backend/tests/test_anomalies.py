@@ -118,3 +118,29 @@ def test_custom_thresholds() -> None:
     assert bool(annotated.iloc[0]["flag_position_jump"])
 
     assert len(alerts) == 2
+
+
+def test_alert_contains_message_identity() -> None:
+    """Alerts should contain the position needed for DB matching."""
+
+    source = pd.DataFrame(
+        [
+            {
+                "mmsi": "123456789",
+                "timestamp": "2026-07-01T10:00:00Z",
+                "latitude": 37.9838,
+                "longitude": 23.7275,
+                "reporting_gap_minutes": 20.0,
+                "elapsed_seconds": 1200.0,
+                "sog": 10.0,
+            }
+        ]
+    )
+
+    _, alerts = detect_rule_based_anomalies(source)
+
+    assert len(alerts) == 1
+    assert alerts.iloc[0]["mmsi"] == "123456789"
+    assert alerts.iloc[0]["latitude"] == 37.9838
+    assert alerts.iloc[0]["longitude"] == 23.7275
+    assert alerts.iloc[0]["anomaly_type"] == "reporting_gap"

@@ -5,11 +5,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from seaguard.api.schemas.maritime import (
-    AnomalyListResponse,
-    AnomalyResponse,
-)
-from seaguard.db.models import AnomalyAlert, Vessel
+from seaguard.api.schemas.maritime import AnomalyListResponse
+from seaguard.db.models import AISMessage, AnomalyAlert, Vessel
 from seaguard.db.session import get_session
 
 router = APIRouter(
@@ -84,10 +81,16 @@ def list_anomalies(
         select(
             AnomalyAlert,
             Vessel.mmsi,
+            AISMessage.latitude,
+            AISMessage.longitude,
         )
         .join(
             Vessel,
             Vessel.id == AnomalyAlert.vessel_id,
+        )
+        .join(
+            AISMessage,
+            AISMessage.id == AnomalyAlert.ais_message_id,
         )
         .where(*conditions)
         .order_by(
@@ -102,23 +105,27 @@ def list_anomalies(
     rows = session.execute(query_statement).all()
 
     items = [
-        AnomalyResponse(
-            id=alert.id,
-            mmsi=row_mmsi,
-            observed_at=alert.observed_at,
-            anomaly_type=alert.anomaly_type,
-            severity=alert.severity,
-            metric_name=alert.metric_name,
-            metric_value=alert.metric_value,
-            threshold=alert.threshold,
-            message=alert.message,
-        )
-        for alert, row_mmsi in rows
+        {
+            "id": alert.id,
+            "mmsi": row_mmsi,
+            "observed_at": alert.observed_at,
+            "latitude": latitude,
+            "longitude": longitude,
+            "anomaly_type": alert.anomaly_type,
+            "severity": alert.severity,
+            "metric_name": alert.metric_name,
+            "metric_value": alert.metric_value,
+            "threshold": alert.threshold,
+            "message": alert.message,
+        }
+        for alert, row_mmsi, latitude, longitude in rows
     ]
 
-    return AnomalyListResponse(
-        items=items,
-        total=total,
-        limit=limit,
-        offset=offset,
+    return AnomalyListResponse.model_validate(  # noqa: F706
+        {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     )
