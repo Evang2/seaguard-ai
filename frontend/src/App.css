@@ -1,0 +1,164 @@
+.dashboard {
+  width: min(1600px, 100%);
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.dashboard-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.dashboard-header h1 {
+  margin: 4px 0;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  letter-spacing: -0.05em;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #22d3ee;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.subtitle {
+  max-width: 700px;
+  margin: 0;
+  color: #94a3b8;
+}
+
+.refresh-button {
+  border: 1px solid #155e75;
+  border-radius: 10px;
+  padding: 11px 16px;
+  background: #0e7490;
+  color: white;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.refresh-button:hover {
+  background: #0891b2;
+}
+
+.refresh-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px;
+  border: 1px solid #1e3a4a;
+  border-radius: 14px;
+  background: #0f2532;
+}
+
+.summary-card span {
+  color: #94a3b8;
+  font-size: 0.86rem;
+}
+
+.summary-card strong {
+  font-size: 1.6rem;
+}
+
+.error-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid #991b1b;
+  border-radius: 12px;
+  background: #450a0a;
+  color: #fecaca;
+}
+
+.map-panel {
+  overflow: hidden;
+  border: 1px solid #1e3a4a;
+  border-radius: 16px;
+  background: #0f2532;
+}
+
+.map-panel-header {
+  padding: 16px 18px;
+  border-bottom: 1px solid #1e3a4a;
+}
+
+.map-panel-header h2 {
+  margin: 0;
+}
+
+.map-panel-header p {
+  margin: 4px 0 0;
+  color: #94a3b8;
+}
+
+.vessel-map {
+  width: 100%;
+  height: min(68vh, 760px);
+  min-height: 520px;
+}
+
+.vessel-popup {
+  color: #0f172a;
+}
+
+.vessel-popup strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 1rem;
+}
+
+.vessel-popup dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 12px;
+  margin: 0;
+}
+
+.vessel-popup dt {
+  font-weight: 700;
+}
+
+.vessel-popup dd {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .dashboard {
+    padding: 16px;
+  }
+
+  .dashboard-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vessel-map {
+    min-height: 460px;
+  }
+}

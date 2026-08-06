@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "development"
     app_debug: bool = False
 
+    frontend_origin: str = "http://localhost:5173"
+
     database_url: str
 
     model_config = SettingsConfigDict(
