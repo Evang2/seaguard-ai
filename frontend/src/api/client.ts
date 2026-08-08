@@ -1,6 +1,9 @@
 import type {
+  AnomalyListResponse,
   RecentPositionsResponse,
+  VesselTrajectory,
 } from "./types";
+
 
 const DEFAULT_API_BASE_URL =
   "http://127.0.0.1:8000";
@@ -11,19 +14,10 @@ const API_BASE_URL = (
 ).replace(/\/$/, "");
 
 
-export async function fetchRecentPositions(
-  limit = 500,
+async function requestJson<T>(
+  url: string,
   signal?: AbortSignal,
-): Promise<RecentPositionsResponse> {
-  const url = new URL(
-    `${API_BASE_URL}/api/v1/positions/recent`,
-  );
-
-  url.searchParams.set(
-    "limit",
-    String(limit),
-  );
-
+): Promise<T> {
   const response = await fetch(
     url,
     {
@@ -37,11 +31,65 @@ export async function fetchRecentPositions(
 
   if (!response.ok) {
     throw new Error(
-      `Position request failed with status `
+      `API request failed with status `
       + `${response.status}.`,
     );
   }
 
-  const data: RecentPositionsResponse = await response.json();
-  return data;
+  return response.json() as Promise<T>;
+}
+
+
+export function fetchRecentPositions(
+  limit = 500,
+  signal?: AbortSignal,
+): Promise<RecentPositionsResponse> {
+  const url = new URL(
+    `${API_BASE_URL}/api/v1/positions/recent`,
+  );
+
+  url.searchParams.set(
+    "limit",
+    String(limit),
+  );
+
+  return requestJson<
+    RecentPositionsResponse
+  >(
+    url.toString(),
+    signal,
+  );
+}
+
+
+export function fetchVesselTrajectory(
+  mmsi: string,
+  signal?: AbortSignal,
+): Promise<VesselTrajectory> {
+  const encodedMmsi =
+    encodeURIComponent(mmsi);
+
+  return requestJson<VesselTrajectory>(
+    `${API_BASE_URL}/api/v1/vessels/`
+      + `${encodedMmsi}/trajectory`,
+    signal,
+  );
+}
+
+
+export function fetchVesselAnomalies(
+  mmsi: string,
+  signal?: AbortSignal,
+): Promise<AnomalyListResponse> {
+  const url = new URL(
+    `${API_BASE_URL}/api/v1/anomalies`,
+  );
+
+  url.searchParams.set("mmsi", mmsi);
+  url.searchParams.set("limit", "500");
+
+  return requestJson<AnomalyListResponse>(
+    url.toString(),
+    signal,
+  );
 }

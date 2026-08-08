@@ -1,43 +1,26 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import "./App.css";
 
 import {
   fetchRecentPositions,
+  fetchVesselAnomalies,
+  fetchVesselTrajectory,
 } from "./api/client";
 
-import type {
-  RecentPosition,
-} from "./api/types";
+import type { Anomaly, RecentPosition, VesselTrajectory } from "./api/types";
 
-import {
-  VesselMap,
-} from "./components/VesselMap";
+import { VesselMap } from "./components/VesselMap";
 
-
-function formatMeasurement(
-  value: number | null,
-  unit: string,
-): string {
-  if (
-    value === null
-    || !Number.isFinite(value)
-  ) {
+function formatMeasurement(value: number | null, unit: string): string {
+  if (value === null || !Number.isFinite(value)) {
     return "Not available";
   }
 
   return `${value.toFixed(1)} ${unit}`;
 }
 
-
-function formatTimestamp(
-  timestamp: string,
-): string {
+function formatTimestamp(timestamp: string): string {
   const date = new Date(timestamp);
 
   if (Number.isNaN(date.getTime())) {
@@ -47,192 +30,158 @@ function formatTimestamp(
   return date.toLocaleString();
 }
 
-
-function displayVesselName(
-  position: RecentPosition,
-): string {
+function displayVesselName(position: RecentPosition): string {
   const name = position.vessel_name?.trim();
 
   return name || "Unknown vessel";
 }
 
-
 function App() {
-  const [
-    positions,
-    setPositions,
-  ] = useState<RecentPosition[]>([]);
+  const [positions, setPositions] = useState<RecentPosition[]>([]);
 
-  const [
-    isLoading,
-    setIsLoading,
-  ] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const [
-    error,
-    setError,
-  ] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const [
-    searchQuery,
-    setSearchQuery,
-  ] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const [
-    selectedMmsi,
-    setSelectedMmsi,
-  ] = useState<string | null>(null);
+  const [selectedMmsi, setSelectedMmsi] = useState<string | null>(null);
 
+  const [selectedTrajectory, setSelectedTrajectory] =
+    useState<VesselTrajectory | null>(null);
 
-  const loadPositions = useCallback(
-    async () => {
-      setIsLoading(true);
-      setError(null);
+  const [selectedAnomalies, setSelectedAnomalies] = useState<Anomaly[]>([]);
+
+  const [selectionLoading, setSelectionLoading] = useState(false);
+
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+
+  const loadPositions = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchRecentPositions(500);
+
+      
+
+      setPositions(response.items);
+    } catch (caughtError) {
+      console.error("Failed to load positions:", caughtError);
+
+      const message =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "An unknown API error occurred.";
+
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPositions();
+  }, [loadPositions]);
+
+  useEffect(() => {
+    if (selectedMmsi === null) {
+      setSelectedTrajectory(null);
+      setSelectedAnomalies([]);
+      setSelectionError(null);
+      setSelectionLoading(false);
+
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const loadSelectedVessel = async () => {
+      setSelectionLoading(true);
+      setSelectionError(null);
 
       try {
-        const response =
-          await fetchRecentPositions(500);
+        const [trajectory, anomalyResponse] = await Promise.all([
+          fetchVesselTrajectory(selectedMmsi, controller.signal),
 
-        setPositions(response.items);
+          fetchVesselAnomalies(selectedMmsi, controller.signal),
+        ]);
+
+        setSelectedTrajectory(trajectory);
+
+        setSelectedAnomalies(anomalyResponse.items);
       } catch (caughtError) {
+        if (
+          caughtError instanceof DOMException &&
+          caughtError.name === "AbortError"
+        ) {
+          return;
+        }
+
         const message =
           caughtError instanceof Error
             ? caughtError.message
-            : "An unknown API error occurred.";
+            : "Could not load vessel data.";
 
-        setError(message);
+        setSelectionError(message);
       } finally {
-        setIsLoading(false);
-      }
-    },
-    [],
-  );
-
-
-  useEffect(() => {
-    const controller =
-      new AbortController();
-
-    const loadInitialPositions =
-      async () => {
-        setIsLoading(true);
-        setError(null);
-
-        try {
-          const response =
-            await fetchRecentPositions(
-              500,
-              controller.signal,
-            );
-
-          setPositions(response.items);
-        } catch (caughtError) {
-          if (
-            caughtError instanceof DOMException
-            && caughtError.name
-              === "AbortError"
-          ) {
-            return;
-          }
-
-          const message =
-            caughtError instanceof Error
-              ? caughtError.message
-              : "An unknown API error occurred.";
-
-          setError(message);
-        } finally {
-          if (!controller.signal.aborted) {
-            setIsLoading(false);
-          }
+        if (!controller.signal.aborted) {
+          setSelectionLoading(false);
         }
-      };
+      }
+    };
 
-    void loadInitialPositions();
+    void loadSelectedVessel();
 
     return () => {
       controller.abort();
     };
-  }, []);
+  }, [selectedMmsi]);
 
+  const filteredPositions = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
 
-  const filteredPositions = useMemo(
-    () => {
-      const normalizedQuery =
-        searchQuery.trim().toLowerCase();
+    if (normalizedQuery === "") {
+      return positions;
+    }
 
-      if (normalizedQuery === "") {
-        return positions;
-      }
+    return positions.filter((position) => {
+      const vesselName = position.vessel_name?.toLowerCase() ?? "";
 
-      return positions.filter(
-        (position) => {
-          const vesselName =
-            position.vessel_name
-              ?.toLowerCase()
-            ?? "";
-
-          return (
-            position.mmsi.includes(
-              normalizedQuery,
-            )
-            || vesselName.includes(
-              normalizedQuery,
-            )
-          );
-        },
+      return (
+        position.mmsi.includes(normalizedQuery) ||
+        vesselName.includes(normalizedQuery)
       );
-    },
-    [
-      positions,
-      searchQuery,
-    ],
-  );
-
+    });
+  }, [positions, searchQuery]);
 
   const selectedPosition = useMemo(
-    () => positions.find(
-      (position) =>
-        position.mmsi === selectedMmsi,
-    ) ?? null,
-    [
-      positions,
-      selectedMmsi,
-    ],
+    () => positions.find((position) => position.mmsi === selectedMmsi) ?? null,
+    [positions, selectedMmsi],
   );
 
-
   const movingVesselCount = useMemo(
-    () => positions.filter(
-      (position) =>
-        position.sog !== null
-        && position.sog >= 0.5,
-    ).length,
+    () =>
+      positions.filter(
+        (position) => position.sog !== null && position.sog >= 0.5,
+      ).length,
     [positions],
   );
 
-
-  const handleSelectVessel = useCallback(
-    (mmsi: string) => {
-      setSelectedMmsi(mmsi);
-    },
-    [],
-  );
-
+  const handleSelectVessel = useCallback((mmsi: string) => {
+    setSelectedMmsi(mmsi);
+  }, []);
 
   return (
     <main className="dashboard">
       <header className="dashboard-header">
         <div>
-          <p className="eyebrow">
-            Maritime decision support
-          </p>
+          <p className="eyebrow">Maritime decision support</p>
 
           <h1>SeaGuard AI</h1>
 
           <p className="subtitle">
-            Vessel monitoring and explainable
-            AIS anomaly detection.
+            Vessel monitoring and explainable AIS anomaly detection.
           </p>
         </div>
 
@@ -242,17 +191,11 @@ function App() {
           onClick={() => void loadPositions()}
           disabled={isLoading}
         >
-          {isLoading
-            ? "Loading…"
-            : "Refresh positions"}
+          {isLoading ? "Loading…" : "Refresh positions"}
         </button>
       </header>
 
-
-      <section
-        className="summary-grid"
-        aria-label="Vessel position summary"
-      >
+      <section className="summary-grid" aria-label="Vessel position summary">
         <article className="summary-card">
           <span>Displayed vessels</span>
           <strong>{positions.length}</strong>
@@ -265,28 +208,17 @@ function App() {
 
         <article className="summary-card">
           <span>API status</span>
-          <strong>
-            {error === null
-              ? "Connected"
-              : "Unavailable"}
-          </strong>
+          <strong>{error === null ? "Connected" : "Unavailable"}</strong>
         </article>
       </section>
 
-
       {error !== null && (
-        <div
-          className="error-banner"
-          role="alert"
-        >
-          <strong>
-            Could not load vessel positions.
-          </strong>
+        <div className="error-banner" role="alert">
+          <strong>Could not load vessel positions.</strong>
 
           <span>{error}</span>
         </div>
       )}
-
 
       <section className="workspace">
         <aside className="vessel-sidebar">
@@ -294,17 +226,11 @@ function App() {
             <div>
               <h2>Vessels</h2>
 
-              <p>
-                Select a recent AIS position.
-              </p>
+              <p>Select a recent AIS position.</p>
             </div>
           </div>
 
-
-          <label
-            className="search-field"
-            htmlFor="vessel-search"
-          >
+          <label className="search-field" htmlFor="vessel-search">
             <span>Search vessel</span>
 
             <input
@@ -313,109 +239,76 @@ function App() {
               value={searchQuery}
               placeholder="Name or MMSI"
               onChange={(event) => {
-                setSearchQuery(
-                  event.target.value,
-                );
+                setSearchQuery(event.target.value);
               }}
             />
           </label>
 
-
           <p className="result-count">
-            {filteredPositions.length}
-            {" "}
-            result
-            {filteredPositions.length === 1
-              ? ""
-              : "s"}
+            {filteredPositions.length} result
+            {filteredPositions.length === 1 ? "" : "s"}
           </p>
 
-
           <div className="vessel-list">
-            {filteredPositions.map(
-              (position) => {
-                const isSelected =
-                  selectedMmsi
-                  === position.mmsi;
+            {filteredPositions.map((position) => {
+              const isSelected = selectedMmsi === position.mmsi;
 
-                return (
-                  <button
-                    key={position.mmsi}
-                    type="button"
-                    className={
-                      isSelected
-                        ? "vessel-list-item selected"
-                        : "vessel-list-item"
-                    }
-                    onClick={() => {
-                      handleSelectVessel(
-                        position.mmsi,
-                      );
-                    }}
-                  >
-                    <span className="vessel-list-name">
-                      {displayVesselName(
-                        position,
-                      )}
-                    </span>
+              return (
+                <button
+                  key={position.mmsi}
+                  type="button"
+                  className={
+                    isSelected
+                      ? "vessel-list-item selected"
+                      : "vessel-list-item"
+                  }
+                  onClick={() => {
+                    handleSelectVessel(position.mmsi);
+                  }}
+                >
+                  <span className="vessel-list-name">
+                    {displayVesselName(position)}
+                  </span>
 
-                    <span className="vessel-list-mmsi">
-                      MMSI {position.mmsi}
-                    </span>
+                  <span className="vessel-list-mmsi">MMSI {position.mmsi}</span>
 
-                    <span className="vessel-list-speed">
-                      {formatMeasurement(
-                        position.sog,
-                        "kn",
-                      )}
-                    </span>
-                  </button>
-                );
-              },
+                  <span className="vessel-list-speed">
+                    {formatMeasurement(position.sog, "kn")}
+                  </span>
+                </button>
+              );
+            })}
+
+            {!isLoading && filteredPositions.length === 0 && (
+              <div className="empty-list">No matching vessels found.</div>
             )}
-
-
-            {!isLoading
-              && filteredPositions.length === 0
-              && (
-                <div className="empty-list">
-                  No matching vessels found.
-                </div>
-              )}
           </div>
         </aside>
-
 
         <section className="map-panel">
           <div className="map-panel-header">
             <div>
               <h2>Vessel map</h2>
 
-              <p>
-                Click a marker to select its
-                latest AIS report.
-              </p>
+              <p>Click a marker to select its latest AIS report.</p>
             </div>
           </div>
 
           <VesselMap
             positions={positions}
             selectedMmsi={selectedMmsi}
-            onSelectVessel={
-              handleSelectVessel
-            }
+            trajectory={selectedTrajectory}
+            anomalies={selectedAnomalies}
+            onSelectVessel={handleSelectVessel}
           />
         </section>
-
 
         <aside className="details-panel">
           <div className="panel-heading">
             <div>
               <h2>Vessel details</h2>
 
-              <p>
-                Latest imported AIS report.
-              </p>
+              <p>Latest imported AIS report.</p>
             </div>
 
             {selectedPosition !== null && (
@@ -431,11 +324,9 @@ function App() {
             )}
           </div>
 
-
           {selectedPosition === null ? (
             <div className="empty-details">
-              Select a vessel from the map or
-              vessel list.
+              Select a vessel from the map or vessel list.
             </div>
           ) : (
             <div className="vessel-details">
@@ -443,75 +334,58 @@ function App() {
                 <span className="status-dot" />
 
                 <div>
-                  <strong>
-                    {displayVesselName(
-                      selectedPosition,
-                    )}
-                  </strong>
+                  <strong>{displayVesselName(selectedPosition)}</strong>
 
-                  <span>
-                    MMSI {selectedPosition.mmsi}
-                  </span>
+                  <span>MMSI {selectedPosition.mmsi}</span>
                 </div>
               </div>
 
+              <div className="selected-data-summary">
+                {selectionLoading ? (
+                  <span>Loading trajectory and anomalies…</span>
+                ) : selectionError !== null ? (
+                  <span className="selection-error">{selectionError}</span>
+                ) : (
+                  <>
+                    <div>
+                      <span>Anomalies</span>
+                      <strong>{selectedAnomalies.length}</strong>
+                    </div>
+
+                    <div>
+                      <span>Trajectory</span>
+                      <strong>
+                        {selectedTrajectory === null ? "Unavailable" : "Loaded"}
+                      </strong>
+                    </div>
+                  </>
+                )}
+              </div>
 
               <dl className="details-list">
                 <dt>Timestamp</dt>
-                <dd>
-                  {formatTimestamp(
-                    selectedPosition.timestamp,
-                  )}
-                </dd>
+                <dd>{formatTimestamp(selectedPosition.timestamp)}</dd>
 
                 <dt>Latitude</dt>
-                <dd>
-                  {selectedPosition.latitude
-                    .toFixed(5)}
-                </dd>
+                <dd>{selectedPosition.latitude.toFixed(5)}</dd>
 
                 <dt>Longitude</dt>
-                <dd>
-                  {selectedPosition.longitude
-                    .toFixed(5)}
-                </dd>
+                <dd>{selectedPosition.longitude.toFixed(5)}</dd>
 
                 <dt>Speed over ground</dt>
-                <dd>
-                  {formatMeasurement(
-                    selectedPosition.sog,
-                    "kn",
-                  )}
-                </dd>
+                <dd>{formatMeasurement(selectedPosition.sog, "kn")}</dd>
 
                 <dt>Course over ground</dt>
-                <dd>
-                  {formatMeasurement(
-                    selectedPosition.cog,
-                    "°",
-                  )}
-                </dd>
+                <dd>{formatMeasurement(selectedPosition.cog, "°")}</dd>
 
                 <dt>Heading</dt>
-                <dd>
-                  {formatMeasurement(
-                    selectedPosition.heading,
-                    "°",
-                  )}
-                </dd>
+                <dd>{formatMeasurement(selectedPosition.heading, "°")}</dd>
 
                 <dt>Navigation status</dt>
-                <dd>
-                  {selectedPosition
-                    .navigation_status
-                    ?? "Not available"}
-                </dd>
+                <dd>{selectedPosition.navigation_status ?? "Not available"}</dd>
 
                 <dt>Vessel type code</dt>
-                <dd>
-                  {selectedPosition.vessel_type
-                    ?? "Not available"}
-                </dd>
+                <dd>{selectedPosition.vessel_type ?? "Not available"}</dd>
               </dl>
             </div>
           )}
@@ -520,6 +394,5 @@ function App() {
     </main>
   );
 }
-
 
 export default App;
