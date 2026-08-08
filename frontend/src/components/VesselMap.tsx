@@ -13,6 +13,7 @@ import type {
   GeoJSONSource,
   Map,
   MapLayerMouseEvent,
+  StyleSpecification,
 } from "maplibre-gl";
 
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -24,6 +25,8 @@ import type {
 
 interface VesselMapProps {
   positions: RecentPosition[];
+  selectedMmsi: string | null;
+  onSelectVessel: (mmsi: string) => void;
 }
 
 
@@ -35,33 +38,41 @@ interface VesselProperties {
   sog: number;
   cog: number;
   heading: number;
+  navigationStatus: number;
 }
 
 
 const SOURCE_ID = "recent-vessels";
-const LAYER_ID = "recent-vessel-points";
+const VESSEL_LAYER_ID = "recent-vessel-points";
+const SELECTED_LAYER_ID = "selected-vessel-point";
+
+const NO_SELECTED_VESSEL =
+  "__no_selected_vessel__";
 
 
-function escapeHtml(value: unknown): string {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
+const MAP_STYLE: StyleSpecification = {
+  version: 8,
 
+  sources: {
+    openStreetMap: {
+      type: "raster",
+      tiles: [
+        "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      ],
+      tileSize: 256,
+      attribution:
+        "© OpenStreetMap contributors",
+    },
+  },
 
-function displayMeasurement(
-  value: number,
-  unit: string,
-): string {
-  if (value < 0) {
-    return "Not available";
-  }
-
-  return `${value.toFixed(1)} ${unit}`;
-}
+  layers: [
+    {
+      id: "openstreetmap",
+      type: "raster",
+      source: "openStreetMap",
+    },
+  ],
+};
 
 
 function positionsToGeoJSON(
@@ -69,9 +80,11 @@ function positionsToGeoJSON(
 ): FeatureCollection<Point, VesselProperties> {
   return {
     type: "FeatureCollection",
+
     features: positions.map((position) => ({
       type: "Feature",
       id: position.id,
+
       geometry: {
         type: "Point",
         coordinates: [
@@ -79,6 +92,7 @@ function positionsToGeoJSON(
           position.latitude,
         ],
       },
+
       properties: {
         id: position.id,
         mmsi: position.mmsi,
@@ -89,15 +103,63 @@ function positionsToGeoJSON(
         sog: position.sog ?? -1,
         cog: position.cog ?? -1,
         heading: position.heading ?? -1,
+        navigationStatus:
+          position.navigation_status ?? -1,
       },
     })),
   };
 }
 
 
+function formatMeasurement(
+  value: number,
+  unit: string,
+): string {
+  if (
+    !Number.isFinite(value)
+    || value < 0
+  ) {
+    return "Not available";
+  }
+
+  return `${value.toFixed(1)} ${unit}`;
+}
+
+
+function formatTimestamp(
+  timestamp: string,
+): string {
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+
+  return date.toLocaleString();
+}
+
+
+function addDetailRow(
+  list: HTMLDListElement,
+  label: string,
+  value: string,
+): void {
+  const term = document.createElement("dt");
+  term.textContent = label;
+
+  const description =
+    document.createElement("dd");
+
+  description.textContent = value;
+
+  list.append(term, description);
+}
+
+
 function showVesselPopup(
   map: Map,
   event: MapLayerMouseEvent,
+  onSelectVessel: (mmsi: string) => void,
 ): void {
   const feature = event.features?.[0];
 
@@ -111,80 +173,102 @@ function showVesselPopup(
   const properties =
     feature.properties as VesselProperties;
 
-  const coordinates = (
-    feature.geometry.coordinates.slice()
-  ) as [number, number];
+  const mmsi = String(properties.mmsi);
 
-  const popupHtml = `
-    <div class="vessel-popup">
-      <strong>
-        ${escapeHtml(properties.vesselName)}
-      </strong>
+  onSelectVessel(mmsi);
 
-      <dl>
-        <dt>MMSI</dt>
-        <dd>${escapeHtml(properties.mmsi)}</dd>
+  const coordinates = [
+    Number(feature.geometry.coordinates[0]),
+    Number(feature.geometry.coordinates[1]),
+  ] as [number, number];
 
-        <dt>Reported speed</dt>
-        <dd>
-          ${escapeHtml(
-            displayMeasurement(
-              Number(properties.sog),
-              "kn",
-            ),
-          )}
-        </dd>
+  const container =
+    document.createElement("div");
 
-        <dt>Course</dt>
-        <dd>
-          ${escapeHtml(
-            displayMeasurement(
-              Number(properties.cog),
-              "°",
-            ),
-          )}
-        </dd>
+  container.className = "vessel-popup";
 
-        <dt>Heading</dt>
-        <dd>
-          ${escapeHtml(
-            displayMeasurement(
-              Number(properties.heading),
-              "°",
-            ),
-          )}
-        </dd>
+  const title = document.createElement("strong");
 
-        <dt>Timestamp</dt>
-        <dd>
-          ${escapeHtml(
-            new Date(
-              properties.timestamp,
-            ).toLocaleString(),
-          )}
-        </dd>
-      </dl>
-    </div>
-  `;
+  title.textContent =
+    properties.vesselName
+    || "Unknown vessel";
+
+  const details = document.createElement("dl");
+
+  addDetailRow(
+    details,
+    "MMSI",
+    mmsi,
+  );
+
+  addDetailRow(
+    details,
+    "Speed",
+    formatMeasurement(
+      Number(properties.sog),
+      "kn",
+    ),
+  );
+
+  addDetailRow(
+    details,
+    "Course",
+    formatMeasurement(
+      Number(properties.cog),
+      "°",
+    ),
+  );
+
+  addDetailRow(
+    details,
+    "Heading",
+    formatMeasurement(
+      Number(properties.heading),
+      "°",
+    ),
+  );
+
+  addDetailRow(
+    details,
+    "Timestamp",
+    formatTimestamp(properties.timestamp),
+  );
+
+  container.append(title, details);
 
   new maplibregl.Popup({
     closeButton: true,
     maxWidth: "320px",
   })
     .setLngLat(coordinates)
-    .setHTML(popupHtml)
+    .setDOMContent(container)
     .addTo(map);
 }
 
 
 export function VesselMap({
   positions,
+  selectedMmsi,
+  onSelectVessel,
 }: VesselMapProps) {
   const containerRef =
     useRef<HTMLDivElement | null>(null);
 
   const mapRef = useRef<Map | null>(null);
-  const hasFittedBounds = useRef(false);
+
+  const onSelectVesselRef = useRef(
+    onSelectVessel,
+  );
+
+  const hasFittedBoundsRef =
+    useRef(false);
+
+
+  useEffect(() => {
+    onSelectVesselRef.current =
+      onSelectVessel;
+  }, [onSelectVessel]);
+
 
   useEffect(() => {
     if (
@@ -196,10 +280,9 @@ export function VesselMap({
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style:
-        "https://demotiles.maplibre.org/style.json",
-      center: [0, 20],
-      zoom: 1.5,
+      style: MAP_STYLE,
+      center: [23.72, 37.98],
+      zoom: 5,
     });
 
     map.addControl(
@@ -212,6 +295,7 @@ export function VesselMap({
       "top-right",
     );
 
+
     map.on("load", () => {
       map.addSource(
         SOURCE_ID,
@@ -221,20 +305,23 @@ export function VesselMap({
         },
       );
 
+
       map.addLayer({
-        id: LAYER_ID,
+        id: VESSEL_LAYER_ID,
         type: "circle",
         source: SOURCE_ID,
+
         paint: {
           "circle-radius": [
             "interpolate",
             ["linear"],
             ["zoom"],
-            2,
+            3,
             4,
             12,
             8,
           ],
+
           "circle-color": "#22d3ee",
           "circle-stroke-color": "#083344",
           "circle-stroke-width": 2,
@@ -242,39 +329,79 @@ export function VesselMap({
         },
       });
 
+
+      map.addLayer({
+        id: SELECTED_LAYER_ID,
+        type: "circle",
+        source: SOURCE_ID,
+
+        filter: [
+          "==",
+          ["get", "mmsi"],
+          NO_SELECTED_VESSEL,
+        ],
+
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            3,
+            8,
+            12,
+            14,
+          ],
+
+          "circle-color": "#f59e0b",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 3,
+          "circle-opacity": 1,
+        },
+      });
+
+
       map.on(
         "click",
-        LAYER_ID,
+        VESSEL_LAYER_ID,
         (event: MapLayerMouseEvent) => {
-          showVesselPopup(map, event);
+          showVesselPopup(
+            map,
+            event,
+            onSelectVesselRef.current,
+          );
         },
       );
 
+
       map.on(
         "mouseenter",
-        LAYER_ID,
+        VESSEL_LAYER_ID,
         () => {
           map.getCanvas().style.cursor =
             "pointer";
         },
       );
 
+
       map.on(
         "mouseleave",
-        LAYER_ID,
+        VESSEL_LAYER_ID,
         () => {
           map.getCanvas().style.cursor = "";
         },
       );
     });
 
+
     mapRef.current = map;
 
     return () => {
       map.remove();
       mapRef.current = null;
+      hasFittedBoundsRef.current = false;
     };
   }, []);
+
 
   useEffect(() => {
     const map = mapRef.current;
@@ -282,6 +409,7 @@ export function VesselMap({
     if (map === null) {
       return;
     }
+
 
     const updateSource = () => {
       const source = map.getSource(
@@ -296,12 +424,14 @@ export function VesselMap({
         positionsToGeoJSON(positions),
       );
 
+
       if (
         positions.length === 0
-        || hasFittedBounds.current
+        || hasFittedBoundsRef.current
       ) {
         return;
       }
+
 
       if (positions.length === 1) {
         map.flyTo({
@@ -312,9 +442,10 @@ export function VesselMap({
           zoom: 10,
         });
 
-        hasFittedBounds.current = true;
+        hasFittedBoundsRef.current = true;
         return;
       }
+
 
       const bounds =
         new maplibregl.LngLatBounds();
@@ -332,8 +463,9 @@ export function VesselMap({
         duration: 800,
       });
 
-      hasFittedBounds.current = true;
+      hasFittedBoundsRef.current = true;
     };
+
 
     if (
       map.isStyleLoaded()
@@ -349,6 +481,82 @@ export function VesselMap({
       map.off("load", updateSource);
     };
   }, [positions]);
+
+
+  useEffect(() => {
+    const map = mapRef.current;
+
+    if (map === null) {
+      return;
+    }
+
+
+    const updateSelection = () => {
+      if (
+        map.getLayer(SELECTED_LAYER_ID)
+        === undefined
+      ) {
+        return;
+      }
+
+      map.setFilter(
+        SELECTED_LAYER_ID,
+        [
+          "==",
+          ["get", "mmsi"],
+          selectedMmsi
+          ?? NO_SELECTED_VESSEL,
+        ],
+      );
+
+
+      if (selectedMmsi === null) {
+        return;
+      }
+
+      const selectedPosition =
+        positions.find(
+          (position) =>
+            position.mmsi
+            === selectedMmsi,
+        );
+
+      if (selectedPosition === undefined) {
+        return;
+      }
+
+      map.easeTo({
+        center: [
+          selectedPosition.longitude,
+          selectedPosition.latitude,
+        ],
+        zoom: Math.max(
+          map.getZoom(),
+          9,
+        ),
+        duration: 700,
+      });
+    };
+
+
+    if (
+      map.isStyleLoaded()
+      && map.getLayer(SELECTED_LAYER_ID)
+    ) {
+      updateSelection();
+      return;
+    }
+
+    map.once("load", updateSelection);
+
+    return () => {
+      map.off("load", updateSelection);
+    };
+  }, [
+    positions,
+    selectedMmsi,
+  ]);
+
 
   return (
     <div
