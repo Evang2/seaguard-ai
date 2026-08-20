@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
@@ -14,27 +12,24 @@ DEFAULT_RANDOM_STATE = 42
 DEFAULT_N_ESTIMATORS = 200
 DEFAULT_CONTAMINATION = "auto"
 
+MAXIMUM_ML_MOTION_INTERVAL_MINUTES = 10.0
+MINIMUM_ML_TURN_SPEED_KNOTS = 3.0
 
-@dataclass(frozen=True)
-class MLAnomalyResult:
-    """
-    Result produced for one AIS observation.
+MOTION_CONTEXT_FEATURES = [
+    "distance_nm",
+    "calculated_speed_knots",
+    "speed_difference_knots",
+    "course_change_degrees",
+    "heading_change_degrees",
+    "absolute_acceleration_knots_per_minute",
+    "turn_rate_degrees_per_minute",
+]
 
-    anomaly_score:
-        Higher values mean more anomalous behaviour.
-
-    decision_function:
-        Native Isolation Forest decision score.
-        Lower values indicate more abnormal observations.
-
-    is_anomaly:
-        True when Isolation Forest predicts the observation
-        as an outlier.
-    """
-
-    anomaly_score: float
-    decision_function: float
-    is_anomaly: bool
+TURN_CONTEXT_FEATURES = [
+    "course_change_degrees",
+    "heading_change_degrees",
+    "turn_rate_degrees_per_minute",
+]
 
 
 class AISIsolationForestDetector:
@@ -111,6 +106,28 @@ class AISIsolationForestDetector:
             [np.inf, -np.inf],
             np.nan,
         )
+
+        reporting_gap = features["reporting_gap_minutes"]
+
+        invalid_motion_interval = (
+            reporting_gap.isna()
+            | (reporting_gap <= 0.0)
+            | (reporting_gap > MAXIMUM_ML_MOTION_INTERVAL_MINUTES)
+        )
+
+        features.loc[
+            invalid_motion_interval,
+            MOTION_CONTEXT_FEATURES,
+        ] = np.nan
+
+        stationary_or_slow = features["sog"].isna() | (
+            features["sog"] < MINIMUM_ML_TURN_SPEED_KNOTS
+        )
+
+        features.loc[
+            stationary_or_slow,
+            TURN_CONTEXT_FEATURES,
+        ] = np.nan
 
         return features
 

@@ -29,7 +29,7 @@ class AnomalyThresholds:
     heading_change_degrees: float = 90.0
     maximum_turn_interval_minutes: float = 10.0
     minimum_turn_speed_knots: float = 3.0
-    acceleration_knots_per_minute: float = 2.0
+    acceleration_knots_per_minute: float = 8.0
 
 
 def _numeric_column(
@@ -79,6 +79,11 @@ def detect_rule_based_anomalies(
     """
     Add rule-based anomaly flags and create explainable alerts.
 
+    Derived motion anomalies are only evaluated when the time interval
+    between AIS observations is positive and short enough to support
+    meaningful motion calculations. Turn-related anomalies additionally
+    require the vessel to be moving above the configured minimum speed.
+
     Returns:
         A tuple containing:
         1. The trajectory DataFrame with anomaly columns.
@@ -95,14 +100,22 @@ def detect_rule_based_anomalies(
     if missing_columns:
         missing = ", ".join(sorted(missing_columns))
 
-        raise ValueError(f"Missing required anomaly columns: {missing}")
+        raise ValueError(
+            f"Missing required anomaly columns: {missing}",
+        )
 
     active_thresholds = thresholds or AnomalyThresholds()
 
     annotated = source.copy()
 
     annotated["mmsi"] = (
-        annotated["mmsi"].astype("string").str.replace(r"\.0$", "", regex=True)
+        annotated["mmsi"]
+        .astype("string")
+        .str.replace(
+            r"\.0$",
+            "",
+            regex=True,
+        )
     )
 
     annotated["timestamp"] = pd.to_datetime(
@@ -156,38 +169,59 @@ def detect_rule_based_anomalies(
         "nonpositive_time_interval",
     )
 
-    turn_interval_is_short = reporting_gap.le(
-        active_thresholds.maximum_turn_interval_minutes
+    valid_motion_interval = (
+        reporting_gap.notna()
+        & reporting_gap.gt(0.0)
+        & reporting_gap.le(
+            active_thresholds.maximum_turn_interval_minutes,
+        )
     )
 
-    vessel_is_moving = reported_speed.ge(active_thresholds.minimum_turn_speed_knots)
+    valid_turn_context = (
+        valid_motion_interval
+        & reported_speed.notna()
+        & reported_speed.ge(
+            active_thresholds.minimum_turn_speed_knots,
+        )
+    )
 
     annotated["flag_reporting_gap"] = reporting_gap.gt(
-        active_thresholds.reporting_gap_minutes
+        active_thresholds.reporting_gap_minutes,
     ).fillna(False)
 
-    annotated["flag_position_jump"] = calculated_speed.gt(
-        active_thresholds.position_jump_speed_knots
+    annotated["flag_position_jump"] = (
+        valid_motion_interval
+        & calculated_speed.gt(
+            active_thresholds.position_jump_speed_knots,
+        )
     ).fillna(False)
 
-    annotated["flag_speed_mismatch"] = speed_difference.gt(
-        active_thresholds.speed_difference_knots
+    annotated["flag_speed_mismatch"] = (
+        valid_motion_interval
+        & speed_difference.gt(
+            active_thresholds.speed_difference_knots,
+        )
     ).fillna(False)
 
     annotated["flag_rapid_course_change"] = (
-        course_change.gt(active_thresholds.course_change_degrees)
-        & turn_interval_is_short
-        & vessel_is_moving
+        valid_turn_context
+        & course_change.gt(
+            active_thresholds.course_change_degrees,
+        )
     ).fillna(False)
 
     annotated["flag_rapid_heading_change"] = (
-        heading_change.gt(active_thresholds.heading_change_degrees)
-        & turn_interval_is_short
-        & vessel_is_moving
+        valid_turn_context
+        & heading_change.gt(
+            active_thresholds.heading_change_degrees,
+        )
     ).fillna(False)
 
-    annotated["flag_extreme_acceleration"] = acceleration.gt(
-        active_thresholds.acceleration_knots_per_minute
+    annotated["flag_extreme_acceleration"] = (
+        valid_motion_interval
+        & acceleration.gt(
+            active_thresholds.acceleration_knots_per_minute,
+        )
     ).fillna(False)
 
     annotated["flag_nonpositive_interval"] = (

@@ -7,7 +7,65 @@ from seaguard.ais.anomalies import (
 
 
 def test_detect_rule_based_anomalies() -> None:
-    """An observation should trigger explainable anomaly alerts."""
+    """A valid short interval should trigger explainable motion alerts."""
+
+    source = pd.DataFrame(
+        [
+            {
+                "mmsi": "123456789",
+                "timestamp": "2024-06-15T00:00:00Z",
+                "reporting_gap_minutes": None,
+                "elapsed_seconds": None,
+                "calculated_speed_knots": None,
+                "speed_difference_knots": None,
+                "course_change_degrees": None,
+                "heading_change_degrees": None,
+                "acceleration_knots_per_minute": None,
+                "sog": 10.0,
+                "nonpositive_time_interval": False,
+            },
+            {
+                "mmsi": "123456789",
+                "timestamp": "2024-06-15T00:05:00Z",
+                "reporting_gap_minutes": 5.0,
+                "elapsed_seconds": 300.0,
+                "calculated_speed_knots": 80.0,
+                "speed_difference_knots": 25.0,
+                "course_change_degrees": 120.0,
+                "heading_change_degrees": 110.0,
+                "acceleration_knots_per_minute": 9.0,
+                "sog": 12.0,
+                "nonpositive_time_interval": False,
+            },
+        ]
+    )
+
+    annotated, alerts = detect_rule_based_anomalies(source)
+
+    anomalous_row = annotated.iloc[1]
+
+    assert not bool(anomalous_row["flag_reporting_gap"])
+
+    assert bool(anomalous_row["flag_position_jump"])
+    assert bool(anomalous_row["flag_speed_mismatch"])
+    assert bool(anomalous_row["flag_rapid_course_change"])
+    assert bool(anomalous_row["flag_rapid_heading_change"])
+    assert bool(anomalous_row["flag_extreme_acceleration"])
+
+    assert anomalous_row["anomaly_count"] == 5
+    assert len(alerts) == 5
+
+    anomaly_types = set(alerts["anomaly_type"])
+
+    assert "position_jump" in anomaly_types
+    assert "speed_mismatch" in anomaly_types
+    assert "rapid_course_change" in anomaly_types
+    assert "rapid_heading_change" in anomaly_types
+    assert "extreme_acceleration" in anomaly_types
+
+
+def test_long_reporting_gap_does_not_create_motion_anomalies() -> None:
+    """A long gap should not create derived motion anomalies."""
 
     source = pd.DataFrame(
         [
@@ -29,12 +87,12 @@ def test_detect_rule_based_anomalies() -> None:
                 "timestamp": "2024-06-15T00:20:00Z",
                 "reporting_gap_minutes": 20.0,
                 "elapsed_seconds": 1200.0,
-                "calculated_speed_knots": 80.0,
-                "speed_difference_knots": 25.0,
-                "course_change_degrees": 120.0,
-                "heading_change_degrees": 110.0,
-                "acceleration_knots_per_minute": 3.0,
-                "sog": 12.0,
+                "calculated_speed_knots": 100.0,
+                "speed_difference_knots": 50.0,
+                "course_change_degrees": 170.0,
+                "heading_change_degrees": 170.0,
+                "acceleration_knots_per_minute": 20.0,
+                "sog": 20.0,
                 "nonpositive_time_interval": False,
             },
         ]
@@ -45,20 +103,16 @@ def test_detect_rule_based_anomalies() -> None:
     anomalous_row = annotated.iloc[1]
 
     assert bool(anomalous_row["flag_reporting_gap"])
-    assert bool(anomalous_row["flag_position_jump"])
-    assert bool(anomalous_row["flag_speed_mismatch"])
-    assert bool(anomalous_row["flag_extreme_acceleration"])
 
-    # The interval is longer than the maximum turn interval,
-    # so the turn alerts should not trigger.
+    assert not bool(anomalous_row["flag_position_jump"])
+    assert not bool(anomalous_row["flag_speed_mismatch"])
     assert not bool(anomalous_row["flag_rapid_course_change"])
-
     assert not bool(anomalous_row["flag_rapid_heading_change"])
+    assert not bool(anomalous_row["flag_extreme_acceleration"])
 
-    assert anomalous_row["anomaly_count"] == 4
-    assert len(alerts) == 4
-
-    assert "position_jump" in set(alerts["anomaly_type"])
+    assert anomalous_row["anomaly_count"] == 1
+    assert len(alerts) == 1
+    assert alerts.iloc[0]["anomaly_type"] == "reporting_gap"
 
 
 def test_rapid_turn_requires_moving_vessel() -> None:
