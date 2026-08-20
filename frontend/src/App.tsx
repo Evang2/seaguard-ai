@@ -43,6 +43,14 @@ function App() {
 
   const [error, setError] = useState<string | null>(null);
 
+  const [severityFilter, setSeverityFilter] = useState("all");
+
+  const [anomalyTypeFilter, setAnomalyTypeFilter] = useState("all");
+
+  const [selectedAnomalyId, setSelectedAnomalyId] = useState<number | null>(
+    null,
+  );
+
   const [searchQuery, setSearchQuery] = useState("");
 
   const [selectedMmsi, setSelectedMmsi] = useState<string | null>(null);
@@ -62,8 +70,6 @@ function App() {
 
     try {
       const response = await fetchRecentPositions(500);
-
-      
 
       setPositions(response.items);
     } catch (caughtError) {
@@ -88,6 +94,11 @@ function App() {
     if (selectedMmsi === null) {
       setSelectedTrajectory(null);
       setSelectedAnomalies([]);
+      setSelectedAnomalyId(null);
+
+      setSeverityFilter("all");
+      setAnomalyTypeFilter("all");
+
       setSelectionError(null);
       setSelectionLoading(false);
 
@@ -99,6 +110,10 @@ function App() {
     const loadSelectedVessel = async () => {
       setSelectionLoading(true);
       setSelectionError(null);
+
+      setSelectedTrajectory(null);
+      setSelectedAnomalies([]);
+      setSelectedAnomalyId(null);
 
       try {
         const [trajectory, anomalyResponse] = await Promise.all([
@@ -159,7 +174,34 @@ function App() {
     () => positions.find((position) => position.mmsi === selectedMmsi) ?? null,
     [positions, selectedMmsi],
   );
+  const anomalyTypes = useMemo(() => {
+    const types = new Set(
+      selectedAnomalies.map((anomaly) => anomaly.anomaly_type),
+    );
 
+    return Array.from(types).sort();
+  }, [selectedAnomalies]);
+
+  const filteredAnomalies = useMemo(() => {
+    return selectedAnomalies.filter((anomaly) => {
+      const severityMatches =
+        severityFilter === "all" ||
+        anomaly.severity.toLowerCase() === severityFilter;
+
+      const typeMatches =
+        anomalyTypeFilter === "all" ||
+        anomaly.anomaly_type === anomalyTypeFilter;
+
+      return severityMatches && typeMatches;
+    });
+  }, [selectedAnomalies, severityFilter, anomalyTypeFilter]);
+
+  const selectedAnomaly = useMemo(
+    () =>
+      selectedAnomalies.find((anomaly) => anomaly.id === selectedAnomalyId) ??
+      null,
+    [selectedAnomalies, selectedAnomalyId],
+  );
   const movingVesselCount = useMemo(
     () =>
       positions.filter(
@@ -299,8 +341,9 @@ function App() {
             selectedMmsi={selectedMmsi}
             trajectory={selectedTrajectory}
             anomalies={selectedAnomalies}
-            onSelectVessel={handleSelectVessel}
-          />
+            onSelectVessel={handleSelectVessel} selectedAnomalyId={null} onSelectAnomaly={function (): void {
+              throw new Error("Function not implemented.");
+            } }          />
         </section>
 
         <aside className="details-panel">
@@ -361,6 +404,161 @@ function App() {
                   </>
                 )}
               </div>
+
+              <section className="anomaly-investigation">
+                <div className="anomaly-section-heading">
+                  <div>
+                    <h3>Anomaly investigation</h3>
+
+                    <span>
+                      {filteredAnomalies.length} of {selectedAnomalies.length}{" "}
+                      alerts
+                    </span>
+                  </div>
+                </div>
+
+                {!selectionLoading && selectedAnomalies.length > 0 && (
+                  <>
+                    <div className="anomaly-filters">
+                      <label>
+                        <span>Severity</span>
+
+                        <select
+                          value={severityFilter}
+                          onChange={(event) => {
+                            setSeverityFilter(event.target.value);
+                            setSelectedAnomalyId(null);
+                          }}
+                        >
+                          <option value="all">All severities</option>
+                          <option value="critical">Critical</option>
+                          <option value="high">High</option>
+                          <option value="warning">Warning</option>
+                          <option value="medium">Medium</option>
+                          <option value="low">Low</option>
+                        </select>
+                      </label>
+
+                      <label>
+                        <span>Type</span>
+
+                        <select
+                          value={anomalyTypeFilter}
+                          onChange={(event) => {
+                            setAnomalyTypeFilter(event.target.value);
+                            setSelectedAnomalyId(null);
+                          }}
+                        >
+                          <option value="all">All anomaly types</option>
+
+                          {anomalyTypes.map((type) => (
+                            <option key={type} value={type}>
+                              {type.replaceAll("_", " ")}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="anomaly-list">
+                      {filteredAnomalies.map((anomaly) => {
+                        const isSelected = anomaly.id === selectedAnomalyId;
+
+                        return (
+                          <button
+                            key={anomaly.id}
+                            type="button"
+                            className={
+                              isSelected
+                                ? "anomaly-list-item selected"
+                                : "anomaly-list-item"
+                            }
+                            onClick={() => {
+                              setSelectedAnomalyId(anomaly.id);
+                            }}
+                          >
+                            <div className="anomaly-list-header">
+                              <strong>
+                                {anomaly.anomaly_type.replaceAll("_", " ")}
+                              </strong>
+
+                              <span
+                                className={`severity-badge severity-${anomaly.severity.toLowerCase()}`}
+                              >
+                                {anomaly.severity}
+                              </span>
+                            </div>
+
+                            <span className="anomaly-time">
+                              {formatTimestamp(anomaly.observed_at)}
+                            </span>
+
+                            <span className="anomaly-message">
+                              {anomaly.message}
+                            </span>
+                          </button>
+                        );
+                      })}
+
+                      {filteredAnomalies.length === 0 && (
+                        <div className="empty-anomalies">
+                          No anomalies match these filters.
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedAnomaly !== null && (
+                      <div className="selected-anomaly-details">
+                        <div className="selected-anomaly-heading">
+                          <strong>
+                            {selectedAnomaly.anomaly_type.replaceAll("_", " ")}
+                          </strong>
+
+                          <span
+                            className={`severity-badge severity-${selectedAnomaly.severity.toLowerCase()}`}
+                          >
+                            {selectedAnomaly.severity}
+                          </span>
+                        </div>
+
+                        <dl>
+                          <dt>Observed</dt>
+                          <dd>
+                            {formatTimestamp(selectedAnomaly.observed_at)}
+                          </dd>
+
+                          <dt>Metric</dt>
+                          <dd>{selectedAnomaly.metric_name}</dd>
+
+                          <dt>Value</dt>
+                          <dd>
+                            {selectedAnomaly.metric_value ?? "Not available"}
+                          </dd>
+
+                          <dt>Threshold</dt>
+                          <dd>
+                            {selectedAnomaly.threshold ?? "Not available"}
+                          </dd>
+
+                          <dt>Latitude</dt>
+                          <dd>{selectedAnomaly.latitude.toFixed(5)}</dd>
+
+                          <dt>Longitude</dt>
+                          <dd>{selectedAnomaly.longitude.toFixed(5)}</dd>
+                        </dl>
+
+                        <p>{selectedAnomaly.message}</p>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {!selectionLoading && selectedAnomalies.length === 0 && (
+                  <div className="empty-anomalies">
+                    No anomaly alerts were recorded for this vessel.
+                  </div>
+                )}
+              </section>
 
               <dl className="details-list">
                 <dt>Timestamp</dt>

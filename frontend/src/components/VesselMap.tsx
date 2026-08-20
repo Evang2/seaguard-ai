@@ -30,9 +30,16 @@ import type {
 interface VesselMapProps {
   positions: RecentPosition[];
   selectedMmsi: string | null;
+
   trajectory: VesselTrajectory | null;
+
   anomalies: Anomaly[];
+
+  selectedAnomalyId: number | null;
+
   onSelectVessel: (mmsi: string) => void;
+
+  onSelectAnomaly: (anomalyId: number) => void;
 }
 
 
@@ -77,6 +84,11 @@ const ANOMALY_SOURCE_ID =
 
 const ANOMALY_LAYER_ID =
   "selected-anomaly-points";
+
+const SELECTED_ANOMALY_LAYER_ID =
+  "selected-anomaly-highlight";
+
+const NO_SELECTED_ANOMALY = -1;
 
 const NO_SELECTED_VESSEL =
   "__no_selected_vessel__";
@@ -608,7 +620,9 @@ export function VesselMap({
   selectedMmsi,
   trajectory,
   anomalies,
+  selectedAnomalyId,
   onSelectVessel,
+  onSelectAnomaly,
 }: VesselMapProps) {
   const containerRef =
     useRef<HTMLDivElement | null>(
@@ -621,6 +635,9 @@ export function VesselMap({
   const onSelectVesselRef =
     useRef(onSelectVessel);
 
+  const onSelectAnomalyRef =
+  useRef(onSelectAnomaly);
+
   const hasFittedBoundsRef =
     useRef(false);
 
@@ -629,6 +646,11 @@ export function VesselMap({
     onSelectVesselRef.current =
       onSelectVessel;
   }, [onSelectVessel]);
+
+  useEffect(() => {
+  onSelectAnomalyRef.current =
+    onSelectAnomaly;
+}, [onSelectAnomaly]);
 
 
   /*
@@ -871,6 +893,37 @@ export function VesselMap({
       });
 
 
+      map.addLayer({
+        id:
+          SELECTED_ANOMALY_LAYER_ID,
+
+        type: "circle",
+
+        source:
+          ANOMALY_SOURCE_ID,
+
+        filter: [
+          "==",
+          ["get", "id"],
+          NO_SELECTED_ANOMALY,
+        ],
+
+        paint: {
+          "circle-radius": 12,
+
+          "circle-color":
+            "rgba(0, 0, 0, 0)",
+
+          "circle-stroke-color":
+            "#ffffff",
+
+          "circle-stroke-width": 4,
+
+          "circle-opacity": 1,
+        },
+      });
+
+
       /*
        * Vessel interactions.
        */
@@ -915,6 +968,22 @@ export function VesselMap({
         "click",
         ANOMALY_LAYER_ID,
         (event: MapLayerMouseEvent) => {
+          const feature =
+            event.features?.[0];
+
+          if (feature !== undefined) {
+            const anomalyId =
+              Number(
+                feature.properties?.id,
+              );
+
+            if (Number.isFinite(anomalyId)) {
+              onSelectAnomalyRef.current(
+                anomalyId,
+              );
+            }
+          }
+
           showAnomalyPopup(
             map,
             event,
@@ -1359,6 +1428,114 @@ export function VesselMap({
       );
     };
   }, [anomalies]);
+
+
+  /*
+   * Highlight and focus the selected anomaly.
+   */
+  useEffect(() => {
+    const map =
+      mapRef.current;
+
+    if (map === null) {
+      return;
+    }
+
+
+    const updateSelectedAnomaly = () => {
+      if (
+        map.getLayer(
+          SELECTED_ANOMALY_LAYER_ID,
+        ) === undefined
+      ) {
+        return;
+      }
+
+
+      map.setFilter(
+        SELECTED_ANOMALY_LAYER_ID,
+        [
+          "==",
+          ["get", "id"],
+          selectedAnomalyId
+          ?? NO_SELECTED_ANOMALY,
+        ],
+      );
+
+
+      if (selectedAnomalyId === null) {
+        return;
+      }
+
+
+      const selectedAnomaly =
+        anomalies.find(
+          (anomaly) =>
+            anomaly.id
+            === selectedAnomalyId,
+        );
+
+      if (selectedAnomaly === undefined) {
+        return;
+      }
+
+
+      if (
+        !Number.isFinite(
+          selectedAnomaly.longitude,
+        )
+        || !Number.isFinite(
+          selectedAnomaly.latitude,
+        )
+      ) {
+        return;
+      }
+
+
+      map.flyTo({
+        center: [
+          selectedAnomaly.longitude,
+          selectedAnomaly.latitude,
+        ],
+
+        zoom: Math.max(
+          map.getZoom(),
+          13,
+        ),
+
+        duration: 700,
+      });
+    };
+
+
+    if (
+      map.isStyleLoaded()
+      && map.getLayer(
+        SELECTED_ANOMALY_LAYER_ID,
+      )
+    ) {
+      updateSelectedAnomaly();
+
+      return;
+    }
+
+
+    map.once(
+      "load",
+      updateSelectedAnomaly,
+    );
+
+
+    return () => {
+      map.off(
+        "load",
+        updateSelectedAnomaly,
+      );
+    };
+  }, [
+    anomalies,
+    selectedAnomalyId,
+  ]);
 
 
   return (
