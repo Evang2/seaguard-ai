@@ -6,7 +6,10 @@ from geoalchemy2 import alembic_helpers
 from sqlalchemy import engine_from_config, pool
 
 from seaguard.core.config import get_settings
-from seaguard.db import models  # noqa: F401
+from seaguard.db import (
+    models,  # noqa: F401
+    risk_models,  # noqa: F401
+)
 from seaguard.db.base import Base
 
 config = context.config

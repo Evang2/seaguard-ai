@@ -1,6 +1,7 @@
 import type {
   AnomalyListResponse,
   RecentPositionsResponse,
+  RiskAssessmentListResponse,
   VesselTrajectory,
 } from "./types";
 
@@ -89,6 +90,26 @@ export function fetchVesselAnomalies(
   url.searchParams.set("limit", "500");
 
   return requestJson<AnomalyListResponse>(
+    url.toString(),
+    signal,
+  );
+}
+
+
+export function fetchVesselRiskAssessments(
+  mmsi: string,
+  signal?: AbortSignal,
+): Promise<RiskAssessmentListResponse> {
+  const encodedMmsi =
+    encodeURIComponent(mmsi);
+
+  const url = new URL(
+    `${API_BASE_URL}/api/v1/risk/${encodedMmsi}`,
+  );
+
+  url.searchParams.set("limit", "500");
+
+  return requestJson<RiskAssessmentListResponse>(
     url.toString(),
     signal,
   );

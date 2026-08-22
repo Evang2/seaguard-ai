@@ -2,6 +2,7 @@ from geoalchemy2 import Geography
 
 from seaguard.db import models  # noqa: F401
 from seaguard.db.base import Base
+from seaguard.db.risk_models import RiskAssessment
 
 
 def test_expected_tables_are_registered() -> None:
@@ -12,8 +13,9 @@ def test_expected_tables_are_registered() -> None:
         "ais_messages",
         "anomaly_alerts",
         "import_jobs",
+        "risk_assessments",
     }
-
+    assert RiskAssessment.__tablename__ == "risk_assessments"
     assert expected_tables == set(Base.metadata.tables)
 
 

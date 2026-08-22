@@ -54,3 +54,43 @@ export interface AnomalyListResponse {
   limit: number;
   offset: number;
 }
+
+
+export type RiskLevel =
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
+
+
+export type RuleSeverity =
+  | "none"
+  | "warning"
+  | "high"
+  | "critical";
+
+
+export interface RiskAssessment {
+  id: number;
+  ais_message_id: number;
+  mmsi: string;
+  observed_at: string;
+  latitude: number;
+  longitude: number;
+  ml_anomaly_score: number;
+  ml_anomaly_percentile: number;
+  rule_flag_count: number;
+  rule_severity: RuleSeverity;
+  detector_agreement: boolean;
+  risk_level: RiskLevel;
+  risk_reasons: string;
+  assessment_version: string;
+}
+
+
+export interface RiskAssessmentListResponse {
+  items: RiskAssessment[];
+  total: number;
+  limit: number;
+  offset: number;
+}
