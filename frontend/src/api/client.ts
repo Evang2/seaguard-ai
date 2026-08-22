@@ -2,9 +2,9 @@ import type {
   AnomalyListResponse,
   RecentPositionsResponse,
   RiskAssessmentListResponse,
+  RiskSummaryResponse,
   VesselTrajectory,
 } from "./types";
-
 
 const DEFAULT_API_BASE_URL =
   "http://127.0.0.1:8000";
@@ -108,6 +108,35 @@ export function fetchVesselRiskAssessments(
   );
 
   url.searchParams.set("limit", "500");
+
+  return requestJson<RiskAssessmentListResponse>(
+    url.toString(),
+    signal,
+  );
+}
+
+export function fetchRiskSummary(
+  signal?: AbortSignal,
+): Promise<RiskSummaryResponse> {
+  return requestJson<RiskSummaryResponse>(
+    `${API_BASE_URL}/api/v1/risk/summary`,
+    signal,
+  );
+}
+
+
+export function fetchGlobalRiskQueue(
+  limit = 100,
+  signal?: AbortSignal,
+): Promise<RiskAssessmentListResponse> {
+  const url = new URL(
+    `${API_BASE_URL}/api/v1/risk`,
+  );
+
+  url.searchParams.set(
+    "limit",
+    String(limit),
+  );
 
   return requestJson<RiskAssessmentListResponse>(
     url.toString(),

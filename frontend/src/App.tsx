@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import "./App.css";
 import "./components/risk.css";
@@ -18,6 +24,7 @@ import type {
   VesselTrajectory,
 } from "./api/types";
 
+import { RiskOverview } from "./components/RiskOverview";
 import { VesselMap as VesselMapComponent } from "./components/VesselMap";
 
 type VesselMapProps = {
@@ -161,6 +168,9 @@ function App() {
     setSelectedRiskId,
   ] = useState<number | null>(null);
 
+  const pendingRiskIdRef =
+    useRef<number | null>(null);
+
   const loadPositions =
     useCallback(async () => {
       setIsLoading(true);
@@ -199,6 +209,9 @@ function App() {
 
       setSelectedAnomalyId(null);
       setSelectedRiskId(null);
+
+      pendingRiskIdRef.current =
+        null;
 
       setSeverityFilter("all");
       setAnomalyTypeFilter("all");
@@ -258,6 +271,25 @@ function App() {
           setSelectedRisks(
             riskResponse.items,
           );
+
+          const pendingRiskId =
+            pendingRiskIdRef.current;
+
+          if (
+            pendingRiskId !== null
+            && riskResponse.items.some(
+              (assessment) =>
+                assessment.id
+                === pendingRiskId,
+            )
+          ) {
+            setSelectedRiskId(
+              pendingRiskId,
+            );
+
+            pendingRiskIdRef.current =
+              null;
+          }
         } catch (caughtError) {
           if (
             caughtError
@@ -267,6 +299,9 @@ function App() {
           ) {
             return;
           }
+
+          pendingRiskIdRef.current =
+            null;
 
           setSelectionError(
             caughtError instanceof Error
@@ -471,7 +506,12 @@ function App() {
   const handleSelectVessel =
     useCallback(
       (mmsi: string) => {
-        setSelectedMmsi(mmsi);
+        pendingRiskIdRef.current =
+          null;
+
+        setSelectedMmsi(
+          mmsi,
+        );
       },
       [],
     );
@@ -479,11 +519,16 @@ function App() {
   const handleSelectAnomaly =
     useCallback(
       (anomalyId: number) => {
+        pendingRiskIdRef.current =
+          null;
+
         setSelectedAnomalyId(
           anomalyId,
         );
 
-        setSelectedRiskId(null);
+        setSelectedRiskId(
+          null,
+        );
       },
       [],
     );
@@ -491,13 +536,76 @@ function App() {
   const handleSelectRisk =
     useCallback(
       (riskId: number) => {
+        pendingRiskIdRef.current =
+          null;
+
         setSelectedRiskId(
           riskId,
         );
 
-        setSelectedAnomalyId(null);
+        setSelectedAnomalyId(
+          null,
+        );
       },
       [],
+    );
+
+  const handleSelectGlobalRisk =
+    useCallback(
+      (
+        assessment:
+          RiskAssessment,
+      ) => {
+        /*
+         * Use the selected assessment's
+         * exact priority as the filter.
+         *
+         * This guarantees the assessment
+         * remains visible after its vessel
+         * is loaded.
+         */
+        setRiskLevelFilter(
+          assessment.risk_level,
+        );
+
+        setSelectedAnomalyId(
+          null,
+        );
+
+        /*
+         * If the vessel is already loaded,
+         * there is no need to refetch it.
+         */
+        if (
+          assessment.mmsi
+          === selectedMmsi
+        ) {
+          pendingRiskIdRef.current =
+            null;
+
+          setSelectedRiskId(
+            assessment.id,
+          );
+
+          return;
+        }
+
+        /*
+         * The selected risk belongs to
+         * another vessel.
+         *
+         * Remember its ID while the vessel
+         * trajectory/anomaly/risk requests
+         * are being loaded.
+         */
+        pendingRiskIdRef.current =
+          assessment.id;
+
+        setSelectedMmsi(
+          assessment.mmsi,
+        );
+      },
+      [selectedMmsi],
     );
 
   return (
@@ -508,7 +616,9 @@ function App() {
             Maritime decision support
           </p>
 
-          <h1>SeaGuard AI</h1>
+          <h1>
+            SeaGuard AI
+          </h1>
 
           <p className="subtitle">
             Vessel monitoring,
@@ -570,6 +680,12 @@ function App() {
           </strong>
         </article>
       </section>
+
+      <RiskOverview
+        onSelectRisk={
+          handleSelectGlobalRisk
+        }
+      />
 
       {error !== null && (
         <div
@@ -755,11 +871,14 @@ function App() {
                 <button
                   type="button"
                   className="clear-selection"
-                  onClick={() =>
+                  onClick={() => {
+                    pendingRiskIdRef.current =
+                      null;
+
                     setSelectedMmsi(
                       null,
-                    )
-                  }
+                    );
+                  }}
                 >
                   Clear
                 </button>
@@ -894,22 +1013,23 @@ function App() {
                                     .value;
 
                                 if (
-                                  value ===
-                                    "elevated"
-                                  || value ===
-                                    "all"
-                                  || value ===
-                                    "critical"
-                                  || value ===
-                                    "high"
-                                  || value ===
-                                    "medium"
-                                  || value ===
-                                    "low"
+                                  value
+                                    === "elevated"
+                                  || value
+                                    === "all"
+                                  || value
+                                    === "critical"
+                                  || value
+                                    === "high"
+                                  || value
+                                    === "medium"
+                                  || value
+                                    === "low"
                                 ) {
                                   setRiskLevelFilter(
                                     value,
                                   );
+
                                   setSelectedRiskId(
                                     null,
                                   );
@@ -984,7 +1104,8 @@ function App() {
                                       }
                                     >
                                       {
-                                        assessment.risk_level
+                                        assessment
+                                          .risk_level
                                       }
                                     </span>
                                   </div>
@@ -1009,7 +1130,9 @@ function App() {
                                         ? ""
                                         : "s"
                                     }
+
                                     {" · "}
+
                                     {
                                       assessment
                                         .detector_agreement

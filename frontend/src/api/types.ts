@@ -94,3 +94,13 @@ export interface RiskAssessmentListResponse {
   limit: number;
   offset: number;
 }
+
+export interface RiskSummaryResponse {
+  total: number;
+  low: number;
+  medium: number;
+  high: number;
+  critical: number;
+  elevated: number;
+  detector_agreement: number;
+}

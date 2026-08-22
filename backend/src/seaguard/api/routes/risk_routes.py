@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from seaguard.api.schemas.risk import (
     RiskAssessmentListResponse,
     RiskLevel,
+    RiskSummaryResponse,
 )
 from seaguard.db.models import AISMessage, Vessel
 from seaguard.db.risk_models import RiskAssessment
@@ -206,6 +207,50 @@ def list_risk_assessments(
         end_time=end_time,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get(
+    "/summary",
+    response_model=RiskSummaryResponse,
+)
+def get_risk_summary(
+    session: DatabaseSession,
+) -> RiskSummaryResponse:
+    """Return aggregate persisted hybrid-risk statistics."""
+
+    statement = select(
+        func.count(RiskAssessment.id).label("total"),
+        func.count(RiskAssessment.id)
+        .filter(RiskAssessment.risk_level == "low")
+        .label("low"),
+        func.count(RiskAssessment.id)
+        .filter(RiskAssessment.risk_level == "medium")
+        .label("medium"),
+        func.count(RiskAssessment.id)
+        .filter(RiskAssessment.risk_level == "high")
+        .label("high"),
+        func.count(RiskAssessment.id)
+        .filter(RiskAssessment.risk_level == "critical")
+        .label("critical"),
+        func.count(RiskAssessment.id)
+        .filter(RiskAssessment.risk_level != "low")
+        .label("elevated"),
+        func.count(RiskAssessment.id)
+        .filter(RiskAssessment.detector_agreement.is_(True))
+        .label("detector_agreement"),
+    )
+
+    row = session.execute(statement).one()
+
+    return RiskSummaryResponse(
+        total=row.total,
+        low=row.low,
+        medium=row.medium,
+        high=row.high,
+        critical=row.critical,
+        elevated=row.elevated,
+        detector_agreement=(row.detector_agreement),
     )
 
 

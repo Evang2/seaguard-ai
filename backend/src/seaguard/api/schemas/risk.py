@@ -47,3 +47,15 @@ class RiskAssessmentListResponse(BaseModel):
     total: int = Field(ge=0)
     limit: int = Field(ge=1)
     offset: int = Field(ge=0)
+
+
+class RiskSummaryResponse(BaseModel):
+    """Aggregate persisted hybrid-risk statistics."""
+
+    total: int = Field(ge=0)
+    low: int = Field(ge=0)
+    medium: int = Field(ge=0)
+    high: int = Field(ge=0)
+    critical: int = Field(ge=0)
+    elevated: int = Field(ge=0)
+    detector_agreement: int = Field(ge=0)
