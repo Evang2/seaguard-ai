@@ -23,6 +23,8 @@ import {
   formatEngineReasons,
 } from "./utils/riskExplanation";
 
+import { VesselEventTimeline } from "./components/VesselEventTimeline.tsx";
+
 type RiskDisplayFilter = "elevated" | "all" | RiskLevel;
 
 function formatMeasurement(value: number | null, unit: string): string {
@@ -503,6 +505,15 @@ function App() {
                   </>
                 )}
               </div>
+
+              <VesselEventTimeline
+                anomalies={selectedAnomalies}
+                risks={selectedRisks}
+                selectedAnomalyId={selectedAnomalyId}
+                selectedRiskId={selectedRiskId}
+                onSelectAnomaly={handleSelectAnomaly}
+                onSelectRisk={handleSelectRisk}
+              />
 
               <section className="risk-investigation">
                 <div className="risk-section-heading">

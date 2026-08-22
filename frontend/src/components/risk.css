@@ -670,3 +670,341 @@
   cursor: not-allowed;
   opacity: 0.4;
 }
+
+.vessel-event-timeline {
+  margin-top: 16px;
+  border-top: 1px solid #1e3a4a;
+  padding-top: 15px;
+}
+
+.timeline-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.timeline-heading h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.timeline-heading span {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 0.68rem;
+}
+
+.timeline-controls {
+  display: grid;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 11px;
+}
+
+.timeline-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.timeline-controls label > span {
+  color: #64748b;
+  font-size: 0.63rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.timeline-controls select {
+  width: 100%;
+  border: 1px solid #29485a;
+  border-radius: 7px;
+  padding: 7px 8px;
+  background: #071822;
+  color: #e2e8f0;
+  font: inherit;
+  font-size: 0.7rem;
+}
+
+.timeline-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 390px;
+  overflow-y: auto;
+  padding-left: 4px;
+  padding-right: 3px;
+}
+
+.timeline-list::before {
+  position: absolute;
+  top: 15px;
+  bottom: 15px;
+  left: 17px;
+  width: 1px;
+  background: #29485a;
+  content: "";
+}
+
+.timeline-event {
+  position: relative;
+  display: flex;
+  gap: 9px;
+  width: 100%;
+  border: 1px solid #1e3a4a;
+  border-radius: 9px;
+  padding: 9px;
+  background: #081b26;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-event:hover {
+  border-color: #22d3ee;
+  background: #102d3c;
+}
+
+.timeline-event.selected {
+  border-color: #22d3ee;
+  background: #123545;
+  box-shadow:
+    inset 0 0 0 1px
+    rgba(34, 211, 238, 0.2);
+}
+
+.timeline-marker {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #475569;
+  border-radius: 50%;
+  background: #071822;
+  color: #cbd5e1;
+  font-size: 0.55rem;
+  font-weight: 800;
+}
+
+.timeline-risk-event .timeline-marker {
+  border-color: #22d3ee;
+}
+
+.timeline-anomaly-event .timeline-marker {
+  border-color: #f59e0b;
+}
+
+.timeline-event-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.timeline-event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.timeline-event-header strong {
+  overflow: hidden;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-event-time {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 0.61rem;
+}
+
+.timeline-event-description {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 0.64rem;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.timeline-empty {
+  border: 1px dashed #29485a;
+  border-radius: 8px;
+  padding: 13px;
+  color: #64748b;
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+@media (max-width: 650px) {
+  .timeline-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+.timeline-correlation-count {
+  border: 1px solid #155e75;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(34, 211, 238, 0.08);
+  color: #67e8f9 !important;
+  font-size: 0.62rem !important;
+  font-weight: 700;
+}
+
+.timeline-marker-risk {
+  border-color: #22d3ee;
+}
+
+.timeline-marker-anomaly {
+  border-color: #f59e0b;
+}
+
+.timeline-marker-correlated {
+  border-color: #a78bfa;
+  background: #2e1065;
+  color: #ddd6fe;
+}
+
+.timeline-risk-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.timeline-risk-summary span {
+  border: 1px solid #1e3a4a;
+  border-radius: 999px;
+  padding: 3px 6px;
+  background: #071822;
+  color: #94a3b8;
+  font-size: 0.59rem;
+}
+
+.timeline-anomaly-group {
+  margin-top: 8px;
+  border-top: 1px solid #1e3a4a;
+  padding-top: 7px;
+}
+
+.timeline-anomaly-group-title {
+  display: block;
+  margin-bottom: 5px;
+  color: #64748b;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.timeline-anomaly-group ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-anomaly-group li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  color: #cbd5e1;
+  font-size: 0.64rem;
+}
+
+.timeline-correlation-note {
+  display: block;
+  margin-top: 7px;
+  color: #8b5cf6;
+  font-size: 0.59rem;
+  line-height: 1.4;
+}
+
+/* Scrollbars */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #29485a #071822;
+}
+
+/* Chromium / Edge / Safari */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #071822;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid #071822;
+  border-radius: 999px;
+  background: #29485a;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #3b6277;
+}
+
+*::-webkit-scrollbar-corner {
+  background: #071822;
+}
+
+.vessel-list,
+.risk-list,
+.anomaly-list,
+.global-risk-queue,
+.timeline-list {
+  scrollbar-width: thin;
+  scrollbar-color: #31586d transparent;
+}
+
+.vessel-list::-webkit-scrollbar,
+.risk-list::-webkit-scrollbar,
+.anomaly-list::-webkit-scrollbar,
+.global-risk-queue::-webkit-scrollbar,
+.timeline-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.vessel-list::-webkit-scrollbar-track,
+.risk-list::-webkit-scrollbar-track,
+.anomaly-list::-webkit-scrollbar-track,
+.global-risk-queue::-webkit-scrollbar-track,
+.timeline-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vessel-list::-webkit-scrollbar-thumb,
+.risk-list::-webkit-scrollbar-thumb,
+.anomaly-list::-webkit-scrollbar-thumb,
+.global-risk-queue::-webkit-scrollbar-thumb,
+.timeline-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #31586d;
+}
+
+.vessel-list::-webkit-scrollbar-thumb:hover,
+.risk-list::-webkit-scrollbar-thumb:hover,
+.anomaly-list::-webkit-scrollbar-thumb:hover,
+.global-risk-queue::-webkit-scrollbar-thumb:hover,
+.timeline-list::-webkit-scrollbar-thumb:hover {
+  background: #22d3ee;
+}
