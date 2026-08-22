@@ -625,3 +625,48 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+
+.global-risk-item.selected {
+  border-color: #22d3ee;
+  background: #123545;
+  box-shadow:
+    inset 0 0 0 1px
+    rgba(34, 211, 238, 0.22);
+}
+
+.global-risk-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.global-risk-pagination span {
+  min-width: 100px;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.global-risk-pagination button {
+  border: 1px solid #29485a;
+  border-radius: 8px;
+  padding: 8px 13px;
+  background: #071822;
+  color: #e2e8f0;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.global-risk-pagination button:hover:not(:disabled) {
+  border-color: #22d3ee;
+  background: #102d3c;
+}
+
+.global-risk-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
