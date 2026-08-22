@@ -2,6 +2,7 @@ import type {
   AnomalyListResponse,
   RecentPositionsResponse,
   RiskAssessmentListResponse,
+  RiskLevel,
   RiskSummaryResponse,
   VesselTrajectory,
 } from "./types";
@@ -125,17 +126,69 @@ export function fetchRiskSummary(
 }
 
 
+export interface GlobalRiskQueueFilters {
+  mmsi?: string;
+  riskLevel?: RiskLevel;
+  minimumMlPercentile?: number;
+  detectorAgreement?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 export function fetchGlobalRiskQueue(
-  limit = 100,
+  filters: GlobalRiskQueueFilters = {},
   signal?: AbortSignal,
 ): Promise<RiskAssessmentListResponse> {
   const url = new URL(
     `${API_BASE_URL}/api/v1/risk`,
   );
 
+  if (filters.mmsi) {
+    url.searchParams.set(
+      "mmsi",
+      filters.mmsi,
+    );
+  }
+
+  if (filters.riskLevel) {
+    url.searchParams.set(
+      "risk_level",
+      filters.riskLevel,
+    );
+  }
+
+  if (
+    filters.minimumMlPercentile
+    !== undefined
+  ) {
+    url.searchParams.set(
+      "minimum_ml_percentile",
+      String(
+        filters.minimumMlPercentile,
+      ),
+    );
+  }
+
+  if (
+    filters.detectorAgreement
+    !== undefined
+  ) {
+    url.searchParams.set(
+      "detector_agreement",
+      String(
+        filters.detectorAgreement,
+      ),
+    );
+  }
+
   url.searchParams.set(
     "limit",
-    String(limit),
+    String(filters.limit ?? 100),
+  );
+
+  url.searchParams.set(
+    "offset",
+    String(filters.offset ?? 0),
   );
 
   return requestJson<RiskAssessmentListResponse>(

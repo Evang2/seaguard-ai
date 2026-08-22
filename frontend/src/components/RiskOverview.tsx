@@ -1,171 +1,191 @@
-import {
-  useCallback,
-  useEffect,
-  useState,
-} from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 
-import {
-  fetchGlobalRiskQueue,
-  fetchRiskSummary,
-} from "../api/client";
+import { fetchGlobalRiskQueue, fetchRiskSummary } from "../api/client";
 
 import type {
   RiskAssessment,
+  RiskLevel,
   RiskSummaryResponse,
 } from "../api/types";
 
+import { buildRiskExplanation } from "../utils/riskExplanation";
 
 interface RiskOverviewProps {
-  onSelectRisk: (
-    assessment: RiskAssessment,
-  ) => void;
+  onSelectRisk: (assessment: RiskAssessment) => void;
 }
 
+type RiskFilter = "all" | RiskLevel;
 
-function formatTimestamp(
-  timestamp: string,
-): string {
-  const date =
-    new Date(timestamp);
+type AgreementFilter = "all" | "yes" | "no";
 
-  return Number.isNaN(
-    date.getTime(),
-  )
-    ? timestamp
-    : date.toLocaleString();
+type MlFilter = "all" | "95" | "98" | "99" | "99.5";
+
+function formatTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+
+  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
 }
 
-
-function formatPercentile(
-  percentile: number,
-): string {
+function formatPercentile(percentile: number): string {
   return `${percentile.toFixed(2)}th`;
 }
 
+export function RiskOverview({ onSelectRisk }: RiskOverviewProps) {
+  const [summary, setSummary] = useState<RiskSummaryResponse | null>(null);
 
-export function RiskOverview({
-  onSelectRisk,
-}: RiskOverviewProps) {
-  const [
-    summary,
-    setSummary,
-  ] = useState<RiskSummaryResponse | null>(
-    null,
-  );
+  const [queue, setQueue] = useState<RiskAssessment[]>([]);
 
-  const [
-    queue,
-    setQueue,
-  ] = useState<RiskAssessment[]>([]);
+  const [queueTotal, setQueueTotal] = useState(0);
 
-  const [
-    isLoading,
-    setIsLoading,
-  ] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const [
-    error,
-    setError,
-  ] = useState<string | null>(
-    null,
-  );
+  const [error, setError] = useState<string | null>(null);
 
+  const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
 
-  const loadOverview =
-    useCallback(
-      async (
-        signal?: AbortSignal,
-      ) => {
-        setIsLoading(true);
-        setError(null);
+  const [agreementFilter, setAgreementFilter] =
+    useState<AgreementFilter>("all");
 
-        try {
-          const [
-            summaryResponse,
-            queueResponse,
-          ] = await Promise.all([
-            fetchRiskSummary(
-              signal,
-            ),
+  const [mlFilter, setMlFilter] = useState<MlFilter>("all");
 
-            fetchGlobalRiskQueue(
-              100,
-              signal,
-            ),
-          ]);
+  const [mmsiInput, setMmsiInput] = useState("");
 
-          setSummary(
-            summaryResponse,
-          );
+  const [mmsiFilter, setMmsiFilter] = useState("");
 
-          setQueue(
-            queueResponse.items,
-          );
-        } catch (caughtError) {
-          if (
-            caughtError
-              instanceof DOMException
-            && caughtError.name
-              === "AbortError"
-          ) {
-            return;
-          }
+  const [validationError, setValidationError] = useState<string | null>(null);
 
-          console.error(
-            "Failed to load risk overview:",
-            caughtError,
-          );
+  const loadSummary = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await fetchRiskSummary(signal);
 
-          setError(
-            caughtError instanceof Error
-              ? caughtError.message
-              : "Could not load risk overview.",
-          );
-        } finally {
-          if (
-            signal?.aborted
-            !== true
-          ) {
-            setIsLoading(
-              false,
-            );
-          }
+      setSummary(response);
+    } catch (caughtError) {
+      if (
+        caughtError instanceof DOMException &&
+        caughtError.name === "AbortError"
+      ) {
+        return;
+      }
+
+      console.error("Failed to load risk summary:", caughtError);
+    }
+  }, []);
+
+  const loadQueue = useCallback(
+    async (signal?: AbortSignal) => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const response = await fetchGlobalRiskQueue(
+          {
+            mmsi: mmsiFilter || undefined,
+
+            riskLevel: riskFilter === "all" ? undefined : riskFilter,
+
+            minimumMlPercentile:
+              mlFilter === "all" ? undefined : Number(mlFilter),
+
+            detectorAgreement:
+              agreementFilter === "all" ? undefined : agreementFilter === "yes",
+
+            limit: 100,
+            offset: 0,
+          },
+          signal,
+        );
+
+        setQueue(response.items);
+
+        setQueueTotal(response.total);
+      } catch (caughtError) {
+        if (
+          caughtError instanceof DOMException &&
+          caughtError.name === "AbortError"
+        ) {
+          return;
         }
-      },
-      [],
-    );
 
+        console.error("Failed to load investigation queue:", caughtError);
+
+        setError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Could not load investigation queue.",
+        );
+      } finally {
+        if (signal?.aborted !== true) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [agreementFilter, mlFilter, mmsiFilter, riskFilter],
+  );
 
   useEffect(() => {
-    const controller =
-      new AbortController();
+    const controller = new AbortController();
 
-    void loadOverview(
-      controller.signal,
-    );
+    void loadSummary(controller.signal);
 
     return () => {
       controller.abort();
     };
-  }, [loadOverview]);
+  }, [loadSummary]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void loadQueue(controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [loadQueue]);
+
+  const handleMmsiSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const value = mmsiInput.trim();
+
+    if (value !== "" && !/^\d{9}$/.test(value)) {
+      setValidationError("MMSI must contain exactly 9 digits.");
+
+      return;
+    }
+
+    setValidationError(null);
+
+    setMmsiFilter(value);
+  };
+
+  const clearFilters = () => {
+    setRiskFilter("all");
+
+    setAgreementFilter("all");
+
+    setMlFilter("all");
+
+    setMmsiInput("");
+    setMmsiFilter("");
+
+    setValidationError(null);
+  };
+
+  const hasActiveFilters =
+    riskFilter !== "all" ||
+    agreementFilter !== "all" ||
+    mlFilter !== "all" ||
+    mmsiFilter !== "";
 
   return (
     <section className="risk-overview">
       <div className="risk-overview-heading">
         <div>
-          <p className="eyebrow">
-            Hybrid detection
-          </p>
+          <p className="eyebrow">Hybrid detection</p>
 
-          <h2>
-            Investigation overview
-          </h2>
+          <h2>Investigation overview</h2>
 
-          <p>
-            Highest-priority persisted AIS observations
-            across all vessels.
-          </p>
+          <p>Highest-priority persisted AIS observations across all vessels.</p>
         </div>
 
         <button
@@ -173,185 +193,241 @@ export function RiskOverview({
           className="risk-overview-refresh"
           disabled={isLoading}
           onClick={() => {
-            void loadOverview();
+            void loadQueue();
+            void loadSummary();
           }}
         >
-          {isLoading
-            ? "Loading…"
-            : "Refresh risk"}
+          {isLoading ? "Loading…" : "Refresh risk"}
         </button>
       </div>
-
-
-      {error !== null && (
-        <div
-          className="risk-overview-error"
-          role="alert"
-        >
-          {error}
-        </div>
-      )}
-
 
       {summary !== null && (
         <div className="risk-overview-cards">
           <article className="risk-overview-card">
-            <span>
-              Critical
-            </span>
+            <span>Critical</span>
 
-            <strong className="risk-number-critical">
-              {summary.critical}
-            </strong>
+            <strong className="risk-number-critical">{summary.critical}</strong>
 
-            <small>
-              Immediate investigation priority
-            </small>
+            <small>Immediate investigation priority</small>
           </article>
 
-
           <article className="risk-overview-card">
-            <span>
-              High
-            </span>
+            <span>High</span>
 
-            <strong className="risk-number-high">
-              {summary.high}
-            </strong>
+            <strong className="risk-number-high">{summary.high}</strong>
 
-            <small>
-              Strong rule or ML evidence
-            </small>
+            <small>Strong rule or ML evidence</small>
           </article>
 
-
           <article className="risk-overview-card">
-            <span>
-              Elevated
-            </span>
+            <span>Elevated</span>
 
-            <strong>
-              {summary.elevated}
-            </strong>
+            <strong>{summary.elevated}</strong>
 
-            <small>
-              Medium + high + critical
-            </small>
+            <small>Medium + high + critical</small>
           </article>
 
-
           <article className="risk-overview-card">
-            <span>
-              Detector agreement
-            </span>
+            <span>Detector agreement</span>
 
-            <strong>
-              {summary.detector_agreement}
-            </strong>
+            <strong>{summary.detector_agreement}</strong>
 
-            <small>
-              Rules and ML both detected evidence
-            </small>
+            <small>Rules and ML both detected evidence</small>
           </article>
         </div>
       )}
 
+      <div className="global-risk-filters">
+        <label>
+          <span>Priority</span>
+
+          <select
+            value={riskFilter}
+            onChange={(event) => {
+              const value = event.target.value;
+
+              if (
+                value === "all" ||
+                value === "critical" ||
+                value === "high" ||
+                value === "medium" ||
+                value === "low"
+              ) {
+                setRiskFilter(value);
+              }
+            }}
+          >
+            <option value="all">All priorities</option>
+
+            <option value="critical">Critical</option>
+
+            <option value="high">High</option>
+
+            <option value="medium">Medium</option>
+
+            <option value="low">Low</option>
+          </select>
+        </label>
+
+        <label>
+          <span>ML percentile</span>
+
+          <select
+            value={mlFilter}
+            onChange={(event) => {
+              const value = event.target.value;
+
+              if (
+                value === "all" ||
+                value === "95" ||
+                value === "98" ||
+                value === "99" ||
+                value === "99.5"
+              ) {
+                setMlFilter(value);
+              }
+            }}
+          >
+            <option value="all">Any ML score</option>
+
+            <option value="95">≥ 95th</option>
+
+            <option value="98">≥ 98th</option>
+
+            <option value="99">≥ 99th</option>
+
+            <option value="99.5">≥ 99.5th</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Detector agreement</span>
+
+          <select
+            value={agreementFilter}
+            onChange={(event) => {
+              const value = event.target.value;
+
+              if (value === "all" || value === "yes" || value === "no") {
+                setAgreementFilter(value);
+              }
+            }}
+          >
+            <option value="all">Any</option>
+
+            <option value="yes">Rules + ML agree</option>
+
+            <option value="no">No agreement</option>
+          </select>
+        </label>
+
+        <form className="global-risk-mmsi-filter" onSubmit={handleMmsiSubmit}>
+          <label>
+            <span>MMSI</span>
+
+            <input
+              type="search"
+              inputMode="numeric"
+              maxLength={9}
+              placeholder="9-digit MMSI"
+              value={mmsiInput}
+              onChange={(event) => {
+                setMmsiInput(event.target.value);
+              }}
+            />
+          </label>
+
+          <button type="submit">Apply</button>
+        </form>
+
+        {hasActiveFilters && (
+          <button
+            type="button"
+            className="global-risk-clear"
+            onClick={clearFilters}
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {validationError !== null && (
+        <div className="risk-filter-error" role="alert">
+          {validationError}
+        </div>
+      )}
+
+      {error !== null && (
+        <div className="risk-overview-error" role="alert">
+          {error}
+        </div>
+      )}
 
       <div className="global-risk-queue-heading">
         <div>
-          <h3>
-            Investigation queue
-          </h3>
+          <h3>Investigation queue</h3>
 
           <span>
-            Top {queue.length} observations
+            Showing {queue.length} of {queueTotal.toLocaleString()} matching
+            assessments
           </span>
         </div>
 
         {summary !== null && (
           <span className="risk-total-label">
-            {summary.total.toLocaleString()} total assessments
+            {summary.total.toLocaleString()} assessments overall
           </span>
         )}
       </div>
 
-
       {isLoading && queue.length === 0 ? (
-        <div className="global-risk-empty">
-          Loading investigation queue…
-        </div>
+        <div className="global-risk-empty">Loading investigation queue…</div>
       ) : queue.length === 0 ? (
         <div className="global-risk-empty">
-          No persisted risk assessments found.
+          No risk assessments match these filters.
         </div>
       ) : (
         <div className="global-risk-queue">
-          {queue.map(
-            (
-              assessment,
-              index,
-            ) => (
-              <button
-                key={assessment.id}
-                type="button"
-                className="global-risk-item"
-                onClick={() => {
-                  onSelectRisk(
-                    assessment,
-                  );
-                }}
-              >
-                <span className="global-risk-rank">
-                  #{index + 1}
-                </span>
+          {queue.map((assessment, index) => (
+            <button
+              key={assessment.id}
+              type="button"
+              className="global-risk-item"
+              onClick={() => {
+                onSelectRisk(assessment);
+              }}
+            >
+              <span className="global-risk-rank">#{index + 1}</span>
 
-                <div className="global-risk-main">
-                  <div className="global-risk-item-heading">
-                    <strong>
-                      MMSI{" "}
-                      {assessment.mmsi}
-                    </strong>
+              <div className="global-risk-main">
+                <div className="global-risk-item-heading">
+                  <strong>MMSI {assessment.mmsi}</strong>
 
-                    <span
-                      className={
-                        `risk-badge risk-${assessment.risk_level}`
-                      }
-                    >
-                      {assessment.risk_level}
-                    </span>
-                  </div>
-
-                  <span className="global-risk-time">
-                    {formatTimestamp(
-                      assessment.observed_at,
-                    )}
-                  </span>
-
-                  <span className="global-risk-metrics">
-                    ML{" "}
-                    {formatPercentile(
-                      assessment.ml_anomaly_percentile,
-                    )}
-
-                    {" · "}
-
-                    {assessment.rule_flag_count}
-                    {" "}
-                    rule flag
-                    {assessment.rule_flag_count === 1
-                      ? ""
-                      : "s"}
-
-                    {" · "}
-
-                    {assessment.detector_agreement
-                      ? "detectors agree"
-                      : "single-source evidence"}
+                  <span className={`risk-badge risk-${assessment.risk_level}`}>
+                    {assessment.risk_level}
                   </span>
                 </div>
-              </button>
-            ),
-          )}
+
+                <span className="global-risk-time">
+                  {formatTimestamp(assessment.observed_at)}
+                </span>
+
+                <span className="global-risk-metrics">
+                  ML {formatPercentile(assessment.ml_anomaly_percentile)}
+                  {" · "}
+                  {assessment.rule_flag_count} rule flag
+                  {assessment.rule_flag_count === 1 ? "" : "s"}
+                  {" · "}
+                  {assessment.detector_agreement
+                    ? "detectors agree"
+                    : "single-source evidence"}
+                </span>
+                <span className="global-risk-explanation">
+                  {buildRiskExplanation(assessment)}
+                </span>
+              </div>
+            </button>
+          ))}
         </div>
       )}
     </section>
