@@ -1,3 +1,9 @@
+from seaguard.collision.candidates import (
+    EncounterCandidate,
+    EncounterCandidateSearchResult,
+    EncounterVessel,
+    generate_encounter_candidates,
+)
 from seaguard.collision.geometry import (
     CPAResult,
     VesselMotion,
@@ -15,7 +21,11 @@ __all__ = [
     "CollisionRiskAssessment",
     "CollisionRiskLevel",
     "CollisionRiskThresholds",
+    "EncounterCandidate",
+    "EncounterCandidateSearchResult",
+    "EncounterVessel",
     "VesselMotion",
     "assess_collision_risk",
     "calculate_cpa_tcpa",
+    "generate_encounter_candidates",
 ]
