@@ -14,6 +14,7 @@ def test_expected_tables_are_registered() -> None:
         "anomaly_alerts",
         "import_jobs",
         "risk_assessments",
+        "collision_encounters",
     }
     assert RiskAssessment.__tablename__ == "risk_assessments"
     assert expected_tables == set(Base.metadata.tables)
