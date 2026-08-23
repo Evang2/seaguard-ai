@@ -11,6 +11,7 @@ from seaguard.db import (
     risk_models,  # noqa: F401
 )
 from seaguard.db.base import Base
+from seaguard.db.collision_models import CollisionEncounterRecord  # noqa: F401
 
 config = context.config
 
