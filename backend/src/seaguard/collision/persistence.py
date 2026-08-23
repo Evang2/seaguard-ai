@@ -2,7 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from math import isfinite
 
-from sqlalchemy import func, select
+from geoalchemy2 import Geometry
+from sqlalchemy import cast, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -88,8 +89,24 @@ def load_latest_collision_snapshot(
             Vessel.mmsi.label("mmsi"),
             AISMessage.id.label("ais_message_id"),
             AISMessage.timestamp.label("observed_at"),
-            func.ST_Y(AISMessage.position).label("latitude"),
-            func.ST_X(AISMessage.position).label("longitude"),
+            func.ST_Y(
+                cast(
+                    AISMessage.position,
+                    Geometry(
+                        geometry_type="POINT",
+                        srid=4326,
+                    ),
+                )
+            ).label("latitude"),
+            func.ST_X(
+                cast(
+                    AISMessage.position,
+                    Geometry(
+                        geometry_type="POINT",
+                        srid=4326,
+                    ),
+                )
+            ).label("longitude"),
             AISMessage.sog.label("sog"),
             AISMessage.cog.label("cog"),
             func.row_number()

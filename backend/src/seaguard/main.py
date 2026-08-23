@@ -23,43 +23,32 @@ app = FastAPI(
 )
 
 
+allowed_origins = {
+    settings.frontend_origin,
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+}
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    allow_origins=list(allowed_origins),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# The health router defines routes such as /health and
-# /health/database, so the API version prefix is added here.
 app.include_router(
     health_router,
     prefix="/api/v1",
 )
 
+app.include_router(vessels_router)
+app.include_router(positions_router)
+app.include_router(anomalies_router)
+app.include_router(risk_router)
 
-# These routers already contain their complete /api/v1 prefixes.
-app.include_router(
-    vessels_router,
-)
-
-app.include_router(
-    positions_router,
-)
-
-app.include_router(
-    anomalies_router,
-)
-
-app.include_router(
-    risk_router,
-)
-
-
-# The collision router defines its own /collisions prefix,
-# so the /api/v1 prefix is added here.
 app.include_router(
     collision_router,
     prefix="/api/v1",

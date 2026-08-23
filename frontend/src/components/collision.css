@@ -1,0 +1,145 @@
+.vessel-collision-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.vessel-collision-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.vessel-collision-heading h3 {
+  margin: 0;
+}
+
+.vessel-collision-heading span {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  opacity: 0.65;
+}
+
+.vessel-collision-count {
+  display: inline-flex;
+  min-width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.55rem;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.08);
+}
+
+.vessel-collision-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.vessel-collision-item {
+  width: 100%;
+  padding: 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.3);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vessel-collision-item:hover {
+  border-color: rgba(34, 211, 238, 0.45);
+  background: rgba(34, 211, 238, 0.06);
+}
+
+.vessel-collision-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.vessel-collision-item-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.vessel-collision-item-header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vessel-collision-item-header > div > span {
+  font-size: 0.75rem;
+  opacity: 0.6;
+}
+
+.vessel-collision-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.vessel-collision-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.vessel-collision-metrics span {
+  font-size: 0.7rem;
+  opacity: 0.6;
+}
+
+.vessel-collision-metrics strong {
+  font-size: 0.82rem;
+}
+
+.vessel-collision-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  font-size: 0.72rem;
+}
+
+.vessel-collision-footer span {
+  opacity: 0.6;
+}
+
+.vessel-collision-footer strong {
+  color: #22d3ee;
+}
+
+.vessel-collision-empty {
+  padding: 0.8rem;
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+  border-radius: 0.65rem;
+  font-size: 0.82rem;
+  opacity: 0.7;
+}
+
+.vessel-collision-note {
+  line-height: 1.45;
+  opacity: 0.55;
+}
+
+@media (max-width: 720px) {
+  .vessel-collision-metrics {
+    grid-template-columns: 1fr;
+  }
+}

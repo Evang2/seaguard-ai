@@ -104,3 +104,66 @@ export interface RiskSummaryResponse {
   elevated: number;
   detector_agreement: number;
 }
+
+export type CollisionRiskLevel =
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
+
+export interface CollisionVesselState {
+  vessel_id: number;
+  ais_message_id: number;
+
+  mmsi: string;
+  name: string | null;
+
+  observed_at: string;
+
+  latitude: number;
+  longitude: number;
+
+  sog: number | null;
+  cog: number | null;
+}
+
+export interface CollisionEncounter {
+  id: number;
+  observed_at: string;
+
+  vessel_a: CollisionVesselState;
+  vessel_b: CollisionVesselState;
+
+  current_distance_nm: number;
+  cpa_distance_nm: number;
+  tcpa_minutes: number | null;
+
+  relative_speed_knots: number;
+  closing_speed_knots: number;
+
+  bearing_from_a_to_b_degrees: number;
+
+  risk_level: CollisionRiskLevel;
+
+  reasons: string[];
+
+  assessment_version: string;
+  created_at: string;
+}
+
+export interface CollisionEncounterListResponse {
+  items: CollisionEncounter[];
+
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface CollisionSummaryResponse {
+  total: number;
+
+  low: number;
+  medium: number;
+  high: number;
+  critical: number;
+}

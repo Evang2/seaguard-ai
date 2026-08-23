@@ -1,7 +1,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import case, func, or_, select
+from geoalchemy2 import Geometry
+from sqlalchemy import case, cast, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from seaguard.api.schemas.collision import (
@@ -44,6 +45,42 @@ RISK_PRIORITY = case(
 )
 
 
+def _position_latitude(position):
+    """
+    Extract latitude from a PostGIS geography POINT.
+
+    AISMessage.position is stored as geography, while ST_Y expects
+    geometry, so the value must be explicitly cast first.
+    """
+    return func.ST_Y(
+        cast(
+            position,
+            Geometry(
+                geometry_type="POINT",
+                srid=4326,
+            ),
+        )
+    )
+
+
+def _position_longitude(position):
+    """
+    Extract longitude from a PostGIS geography POINT.
+
+    AISMessage.position is stored as geography, while ST_X expects
+    geometry, so the value must be explicitly cast first.
+    """
+    return func.ST_X(
+        cast(
+            position,
+            Geometry(
+                geometry_type="POINT",
+                srid=4326,
+            ),
+        )
+    )
+
+
 def _build_collision_query():
     vessel_a = aliased(
         Vessel,
@@ -72,12 +109,12 @@ def _build_collision_query():
             vessel_a.name.label("vessel_a_name"),
             vessel_b.mmsi.label("vessel_b_mmsi"),
             vessel_b.name.label("vessel_b_name"),
-            func.ST_Y(message_a.position).label("vessel_a_latitude"),
-            func.ST_X(message_a.position).label("vessel_a_longitude"),
+            _position_latitude(message_a.position).label("vessel_a_latitude"),
+            _position_longitude(message_a.position).label("vessel_a_longitude"),
             message_a.sog.label("vessel_a_sog"),
             message_a.cog.label("vessel_a_cog"),
-            func.ST_Y(message_b.position).label("vessel_b_latitude"),
-            func.ST_X(message_b.position).label("vessel_b_longitude"),
+            _position_latitude(message_b.position).label("vessel_b_latitude"),
+            _position_longitude(message_b.position).label("vessel_b_longitude"),
             message_b.sog.label("vessel_b_sog"),
             message_b.cog.label("vessel_b_cog"),
         )

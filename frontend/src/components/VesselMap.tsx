@@ -1,7 +1,4 @@
-import {
-  useEffect,
-  useRef,
-} from "react";
+import { useEffect, useRef } from "react";
 
 import type {
   FeatureCollection,
@@ -22,6 +19,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import type {
   Anomaly,
+  CollisionEncounter,
   RecentPosition,
   RiskAssessment,
   VesselTrajectory,
@@ -33,17 +31,14 @@ interface VesselMapProps {
   trajectory: VesselTrajectory | null;
   anomalies: Anomaly[];
   riskAssessments: RiskAssessment[];
+  collisionEncounters: CollisionEncounter[];
   selectedAnomalyId: number | null;
   selectedRiskId: number | null;
-  onSelectVessel: (
-    mmsi: string,
-  ) => void;
-  onSelectAnomaly: (
-    anomalyId: number,
-  ) => void;
-  onSelectRisk: (
-    riskId: number,
-  ) => void;
+  selectedCollisionId: number | null;
+  onSelectVessel: (mmsi: string) => void;
+  onSelectAnomaly: (anomalyId: number) => void;
+  onSelectRisk: (riskId: number) => void;
+  onSelectCollision: (collisionId: number) => void;
 }
 
 interface VesselProperties {
@@ -76,6 +71,21 @@ interface RiskProperties {
   reasons: string;
 }
 
+interface CollisionProperties {
+  id: number;
+  riskLevel: string;
+  vesselAMmsi: string;
+  vesselAName: string;
+  vesselBMmsi: string;
+  vesselBName: string;
+  currentDistanceNm: number;
+  cpaDistanceNm: number;
+  tcpaMinutes: number | null;
+  relativeSpeedKnots: number;
+  closingSpeedKnots: number;
+  observedAt: string;
+}
+
 interface BackendTrajectoryResponse {
   geometry?: {
     type?: string;
@@ -87,67 +97,48 @@ interface BackendTrajectoryResponse {
   }>;
 }
 
-const VESSEL_SOURCE_ID =
-  "recent-vessels";
+const VESSEL_SOURCE_ID = "recent-vessels";
+const VESSEL_LAYER_ID = "recent-vessel-points";
+const SELECTED_VESSEL_LAYER_ID = "selected-vessel-point";
 
-const VESSEL_LAYER_ID =
-  "recent-vessel-points";
+const TRAJECTORY_SOURCE_ID = "selected-trajectory";
+const TRAJECTORY_LAYER_ID = "selected-trajectory-line";
 
-const SELECTED_VESSEL_LAYER_ID =
-  "selected-vessel-point";
+const COLLISION_SOURCE_ID = "collision-encounters";
+const COLLISION_LAYER_ID = "collision-encounter-lines";
+const SELECTED_COLLISION_LAYER_ID = "selected-collision-encounter";
+const COLLISION_HITBOX_LAYER_ID = "collision-encounter-hitbox";
 
-const TRAJECTORY_SOURCE_ID =
-  "selected-trajectory";
+const COLLISION_MARKER_SOURCE_ID = "collision-encounter-markers";
+const COLLISION_MARKER_LAYER_ID = "collision-encounter-markers-visible";
+const SELECTED_COLLISION_MARKER_LAYER_ID =
+  "selected-collision-encounter-marker";
+const COLLISION_MARKER_HITBOX_LAYER_ID =
+  "collision-encounter-marker-hitbox";
 
-const TRAJECTORY_LAYER_ID =
-  "selected-trajectory-line";
+const RISK_SOURCE_ID = "selected-risk-assessments";
+const RISK_LAYER_ID = "selected-risk-points";
+const SELECTED_RISK_LAYER_ID = "selected-risk-highlight";
 
-const RISK_SOURCE_ID =
-  "selected-risk-assessments";
+const ANOMALY_SOURCE_ID = "selected-anomalies";
+const ANOMALY_LAYER_ID = "selected-anomaly-points";
+const SELECTED_ANOMALY_LAYER_ID = "selected-anomaly-highlight";
 
-const RISK_LAYER_ID =
-  "selected-risk-points";
+const NO_SELECTED_VESSEL = "__no_selected_vessel__";
+const NO_SELECTED_ANOMALY = -1;
+const NO_SELECTED_RISK = -1;
+const NO_SELECTED_COLLISION = -1;
 
-const SELECTED_RISK_LAYER_ID =
-  "selected-risk-highlight";
-
-const ANOMALY_SOURCE_ID =
-  "selected-anomalies";
-
-const ANOMALY_LAYER_ID =
-  "selected-anomaly-points";
-
-const SELECTED_ANOMALY_LAYER_ID =
-  "selected-anomaly-highlight";
-
-const NO_SELECTED_VESSEL =
-  "__no_selected_vessel__";
-
-const NO_SELECTED_ANOMALY =
-  -1;
-
-const NO_SELECTED_RISK =
-  -1;
-
-const MAP_STYLE:
-StyleSpecification = {
+const MAP_STYLE: StyleSpecification = {
   version: 8,
-
   sources: {
     openStreetMap: {
       type: "raster",
-
-      tiles: [
-        "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-      ],
-
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
       tileSize: 256,
-
-      attribution:
-        "© OpenStreetMap contributors",
+      attribution: "© OpenStreetMap contributors",
     },
   },
-
   layers: [
     {
       id: "openstreetmap",
@@ -157,41 +148,33 @@ StyleSpecification = {
   ],
 };
 
-function emptyPointCollection<
-  T extends object,
->():
-FeatureCollection<
-  Point,
-  T
-> {
+function emptyPointCollection<T extends object>(): FeatureCollection<Point, T> {
   return {
-    type:
-      "FeatureCollection",
-
+    type: "FeatureCollection",
     features: [],
   };
 }
 
-function emptyLineCollection():
-FeatureCollection<
-  LineString
+function emptyLineCollection(): FeatureCollection<LineString> {
+  return {
+    type: "FeatureCollection",
+    features: [],
+  };
+}
+
+function emptyCollisionCollection(): FeatureCollection<
+  LineString,
+  CollisionProperties
 > {
   return {
-    type:
-      "FeatureCollection",
-
+    type: "FeatureCollection",
     features: [],
   };
 }
 
 function positionsToGeoJSON(
-  positions:
-    RecentPosition[],
-):
-FeatureCollection<
-  Point,
-  VesselProperties
-> {
+  positions: RecentPosition[],
+): FeatureCollection<Point, VesselProperties> {
   return {
     type: "FeatureCollection",
     features: positions.map((position) => ({
@@ -215,88 +198,42 @@ FeatureCollection<
   };
 }
 
-
 function trajectoryToLine(
-  trajectory:
-    VesselTrajectory
-    | null,
-):
-FeatureCollection<
-  LineString
-> {
-  if (
-    trajectory === null
-  ) {
+  trajectory: VesselTrajectory | null,
+): FeatureCollection<LineString> {
+  if (trajectory === null) {
     return emptyLineCollection();
   }
 
   const response = trajectory as unknown as BackendTrajectoryResponse;
+  let coordinates: [number, number][] = [];
 
-  let coordinates:
-    [number, number][] = [];
-
-  if (
-    response.geometry?.type
-    === "LineString"
-  ) {
-    coordinates =
-      (response.geometry
-        ?.coordinates ?? []) as [
-        number,
-        number,
-      ][];
-  } else if (
-    Array.isArray(
-      response.points,
-    )
-  ) {
-    coordinates =
-      response.points.map(
-        (point) => [
-          point.longitude,
-          point.latitude,
-        ],
-      );
+  if (response.geometry?.type === "LineString") {
+    coordinates = (response.geometry.coordinates ?? []) as [number, number][];
+  } else if (Array.isArray(response.points)) {
+    coordinates = response.points.map((point) => [
+      point.longitude,
+      point.latitude,
+    ]);
   }
 
-  coordinates =
-    coordinates.filter(
-      (
-        [
-          longitude,
-          latitude,
-        ],
-      ) =>
-        Number.isFinite(
-          longitude,
-        )
-        && Number.isFinite(
-          latitude,
-        ),
-    );
+  coordinates = coordinates.filter(
+    ([longitude, latitude]) =>
+      Number.isFinite(longitude) && Number.isFinite(latitude),
+  );
 
-  if (
-    coordinates.length
-    < 2
-  ) {
+  if (coordinates.length < 2) {
     return emptyLineCollection();
   }
 
   return {
-    type:
-      "FeatureCollection",
-
+    type: "FeatureCollection",
     features: [
       {
-        type:
-          "Feature",
-
+        type: "Feature",
         properties: {},
-
         geometry: {
-          type:
-            "LineString",
-
+          type: "LineString",
           coordinates,
         },
       },
@@ -305,578 +242,447 @@ FeatureCollection<
 }
 
 function anomaliesToGeoJSON(
-  anomalies:
-    Anomaly[],
-):
-FeatureCollection<
-  Point,
-  AnomalyProperties
-> {
+  anomalies: Anomaly[],
+): FeatureCollection<Point, AnomalyProperties> {
   return {
-    type:
-      "FeatureCollection",
-
-    features:
-      anomalies
-        .filter(
-          (anomaly) =>
-            Number.isFinite(
-              anomaly.longitude,
-            )
-            && Number.isFinite(
-              anomaly.latitude,
-            ),
-        )
-        .map(
-          (anomaly) => ({
-            type: "Feature",
-
-            id:
-              anomaly.id,
-
-            geometry: {
-              type: "Point",
-
-              coordinates: [
-                anomaly.longitude,
-                anomaly.latitude,
-              ],
-            },
-
-            properties: {
-              id:
-                anomaly.id,
-
-              anomalyType:
-                anomaly
-                  .anomaly_type,
-
-              severity:
-                anomaly.severity,
-
-              message:
-                anomaly.message,
-
-              observedAt:
-                anomaly
-                  .observed_at,
-            },
-          }),
-        ),
+    type: "FeatureCollection",
+    features: anomalies
+      .filter(
+        (anomaly) =>
+          Number.isFinite(anomaly.longitude) &&
+          Number.isFinite(anomaly.latitude),
+      )
+      .map((anomaly) => ({
+        type: "Feature",
+        id: anomaly.id,
+        geometry: {
+          type: "Point",
+          coordinates: [anomaly.longitude, anomaly.latitude],
+        },
+        properties: {
+          id: anomaly.id,
+          anomalyType: anomaly.anomaly_type,
+          severity: anomaly.severity,
+          message: anomaly.message,
+          observedAt: anomaly.observed_at,
+        },
+      })),
   };
 }
 
 function risksToGeoJSON(
-  assessments:
-    RiskAssessment[],
-):
-FeatureCollection<
-  Point,
-  RiskProperties
-> {
+  assessments: RiskAssessment[],
+): FeatureCollection<Point, RiskProperties> {
   return {
-    type:
-      "FeatureCollection",
-
-    features:
-      assessments
-        .filter(
-          (
-            assessment,
-          ) =>
-            Number.isFinite(
-              assessment
-                .longitude,
-            )
-            && Number.isFinite(
-              assessment
-                .latitude,
-            ),
-        )
-        .map(
-          (
-            assessment,
-          ) => ({
-            type: "Feature" as const,
-
-            id:
-              assessment.id,
-
-            geometry: {
-              type: "Point" as const,
-
-              coordinates: [
-                assessment
-                  .longitude,
-
-                assessment
-                  .latitude,
-              ],
-            },
-
-            properties: {
-              id:
-                assessment.id,
-
-              riskLevel:
-                assessment
-                  .risk_level,
-
-              mlPercentile:
-                assessment
-                  .ml_anomaly_percentile,
-
-              ruleSeverity:
-                assessment
-                  .rule_severity,
-
-              ruleFlagCount:
-                assessment
-                  .rule_flag_count,
-
-              detectorAgreement:
-                assessment
-                  .detector_agreement,
-
-              observedAt:
-                assessment
-                  .observed_at,
-
-              reasons:
-                assessment
-                  .risk_reasons,
-            },
-          }),
-        ),
+    type: "FeatureCollection",
+    features: assessments
+      .filter(
+        (assessment) =>
+          Number.isFinite(assessment.longitude) &&
+          Number.isFinite(assessment.latitude),
+      )
+      .map((assessment) => ({
+        type: "Feature",
+        id: assessment.id,
+        geometry: {
+          type: "Point",
+          coordinates: [assessment.longitude, assessment.latitude],
+        },
+        properties: {
+          id: assessment.id,
+          riskLevel: assessment.risk_level,
+          mlPercentile: assessment.ml_anomaly_percentile,
+          ruleSeverity: assessment.rule_severity,
+          ruleFlagCount: assessment.rule_flag_count,
+          detectorAgreement: assessment.detector_agreement,
+          observedAt: assessment.observed_at,
+          reasons: assessment.risk_reasons,
+        },
+      })),
   };
 }
 
-function formatMeasurement(
-  value: number,
-  unit: string,
-): string {
-  if (
-    !Number.isFinite(
-      value,
-    )
-    || value < 0
-  ) {
+function collisionsToGeoJSON(
+  encounters: CollisionEncounter[],
+): FeatureCollection<LineString, CollisionProperties> {
+  return {
+    type: "FeatureCollection",
+    features: encounters
+      .filter(
+        (encounter) =>
+          Number.isFinite(encounter.vessel_a.longitude) &&
+          Number.isFinite(encounter.vessel_a.latitude) &&
+          Number.isFinite(encounter.vessel_b.longitude) &&
+          Number.isFinite(encounter.vessel_b.latitude),
+      )
+      .map((encounter) => ({
+        type: "Feature",
+        id: encounter.id,
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [encounter.vessel_a.longitude, encounter.vessel_a.latitude],
+            [encounter.vessel_b.longitude, encounter.vessel_b.latitude],
+          ],
+        },
+        properties: {
+          id: encounter.id,
+          riskLevel: encounter.risk_level,
+          vesselAMmsi: encounter.vessel_a.mmsi,
+          vesselAName: encounter.vessel_a.name ?? "Unknown vessel",
+          vesselBMmsi: encounter.vessel_b.mmsi,
+          vesselBName: encounter.vessel_b.name ?? "Unknown vessel",
+          currentDistanceNm: encounter.current_distance_nm,
+          cpaDistanceNm: encounter.cpa_distance_nm,
+          tcpaMinutes: encounter.tcpa_minutes,
+          relativeSpeedKnots: encounter.relative_speed_knots,
+          closingSpeedKnots: encounter.closing_speed_knots,
+          observedAt: encounter.observed_at,
+        },
+      })),
+  };
+}
+
+function collisionMarkersToGeoJSON(
+  encounters: CollisionEncounter[],
+): FeatureCollection<Point, CollisionProperties> {
+  return {
+    type: "FeatureCollection",
+    features: encounters
+      .filter(
+        (encounter) =>
+          Number.isFinite(encounter.vessel_a.longitude) &&
+          Number.isFinite(encounter.vessel_a.latitude) &&
+          Number.isFinite(encounter.vessel_b.longitude) &&
+          Number.isFinite(encounter.vessel_b.latitude),
+      )
+      .map((encounter) => ({
+        type: "Feature",
+        id: encounter.id,
+        geometry: {
+          type: "Point",
+          coordinates: [
+            (encounter.vessel_a.longitude +
+              encounter.vessel_b.longitude) /
+              2,
+            (encounter.vessel_a.latitude +
+              encounter.vessel_b.latitude) /
+              2,
+          ],
+        },
+        properties: {
+          id: encounter.id,
+          riskLevel: encounter.risk_level,
+          vesselAMmsi: encounter.vessel_a.mmsi,
+          vesselAName:
+            encounter.vessel_a.name ?? "Unknown vessel",
+          vesselBMmsi: encounter.vessel_b.mmsi,
+          vesselBName:
+            encounter.vessel_b.name ?? "Unknown vessel",
+          currentDistanceNm:
+            encounter.current_distance_nm,
+          cpaDistanceNm:
+            encounter.cpa_distance_nm,
+          tcpaMinutes:
+            encounter.tcpa_minutes,
+          relativeSpeedKnots:
+            encounter.relative_speed_knots,
+          closingSpeedKnots:
+            encounter.closing_speed_knots,
+          observedAt:
+            encounter.observed_at,
+        },
+      })),
+  };
+}
+
+
+function formatMeasurement(value: number, unit: string): string {
+  if (!Number.isFinite(value) || value < 0) {
     return "Not available";
   }
 
   return `${value.toFixed(1)} ${unit}`;
 }
 
-function formatTimestamp(
-  timestamp: string,
-): string {
-  const date =
-    new Date(
-      timestamp,
-    );
+function formatSignedMeasurement(value: number, unit: string): string {
+  if (!Number.isFinite(value)) {
+    return "Not available";
+  }
 
-  return Number.isNaN(
-    date.getTime(),
-  )
-    ? timestamp
-    : date.toLocaleString();
+  return `${value.toFixed(1)} ${unit}`;
+}
+
+function formatDistance(value: number): string {
+  if (!Number.isFinite(value) || value < 0) {
+    return "Not available";
+  }
+
+  return `${value.toFixed(3)} NM`;
+}
+
+function formatTcpa(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return "Not available";
+  }
+
+  return `${value.toFixed(1)} min`;
+}
+
+function formatTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+
+  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
 }
 
 function addDetailRow(
-  list:
-    HTMLDListElement,
-
-  label:
-    string,
-
-  value:
-    string,
+  list: HTMLDListElement,
+  label: string,
+  value: string,
 ): void {
-  const term =
-    document.createElement(
-      "dt",
-    );
+  const term = document.createElement("dt");
+  term.textContent = label;
 
-  term.textContent =
-    label;
+  const description = document.createElement("dd");
+  description.textContent = value;
 
-  const description =
-    document.createElement(
-      "dd",
-    );
-
-  description.textContent =
-    value;
-
-  list.append(
-    term,
-    description,
-  );
+  list.append(term, description);
 }
 
 function featureCoordinates(
-  event:
-    MapLayerMouseEvent,
-):
-[number, number] | null {
-  const feature =
-    event.features?.[0];
+  event: MapLayerMouseEvent,
+): [number, number] | null {
+  const feature = event.features?.[0];
 
-  if (
-    feature === undefined
-    || feature.geometry.type
-      !== "Point"
-  ) {
+  if (feature === undefined || feature.geometry.type !== "Point") {
     return null;
   }
 
   return [
-    Number(
-      feature.geometry
-        .coordinates[0],
-    ),
-
-    Number(
-      feature.geometry
-        .coordinates[1],
-    ),
+    Number(feature.geometry.coordinates[0]),
+    Number(feature.geometry.coordinates[1]),
   ];
 }
 
 function showVesselPopup(
   map: Map,
-
-  event:
-    MapLayerMouseEvent,
-
-  onSelectVessel:
-    (
-      mmsi: string,
-    ) => void,
+  event: MapLayerMouseEvent,
+  onSelectVessel: (mmsi: string) => void,
 ): void {
-  const feature =
-    event.features?.[0];
+  const feature = event.features?.[0];
+  const coordinates = featureCoordinates(event);
 
-  const coordinates =
-    featureCoordinates(
-      event,
-    );
-
-  if (
-    feature === undefined
-    || coordinates === null
-  ) {
+  if (feature === undefined || coordinates === null) {
     return;
   }
 
-  const properties =
-    feature.properties as unknown as VesselProperties;
+  const properties = feature.properties as unknown as VesselProperties;
+  const mmsi = String(properties.mmsi);
 
-  const mmsi =
-    String(
-      properties.mmsi,
-    );
+  onSelectVessel(mmsi);
 
-  onSelectVessel(
-    mmsi,
-  );
+  const container = document.createElement("div");
+  container.className = "vessel-popup";
 
-  const container =
-    document.createElement(
-      "div",
-    );
+  const title = document.createElement("strong");
+  title.textContent = properties.vesselName || "Unknown vessel";
 
-  container.className =
-    "vessel-popup";
+  const details = document.createElement("dl");
 
-  const title =
-    document.createElement(
-      "strong",
-    );
-
-  title.textContent =
-    properties.vesselName
-    || "Unknown vessel";
-
-  const details =
-    document.createElement(
-      "dl",
-    );
-
-  addDetailRow(
-    details,
-    "MMSI",
-    mmsi,
-  );
-
+  addDetailRow(details, "MMSI", mmsi);
   addDetailRow(
     details,
     "Speed",
-    formatMeasurement(
-      Number(
-        properties.sog,
-      ),
-      "kn",
-    ),
+    formatMeasurement(Number(properties.sog), "kn"),
   );
-
   addDetailRow(
     details,
     "Course",
-    formatMeasurement(
-      Number(
-        properties.cog,
-      ),
-      "°",
-    ),
+    formatMeasurement(Number(properties.cog), "°"),
   );
-
   addDetailRow(
     details,
     "Heading",
-    formatMeasurement(
-      Number(
-        properties.heading,
-      ),
-      "°",
-    ),
+    formatMeasurement(Number(properties.heading), "°"),
   );
+  addDetailRow(details, "Timestamp", formatTimestamp(properties.timestamp));
 
-  addDetailRow(
-    details,
-    "Timestamp",
-    formatTimestamp(
-      properties.timestamp,
-    ),
-  );
-
-  container.append(
-    title,
-    details,
-  );
+  container.append(title, details);
 
   new maplibregl.Popup({
-    closeButton:
-      true,
-
-    maxWidth:
-      "320px",
+    closeButton: true,
+    maxWidth: "320px",
   })
-    .setLngLat(
-      coordinates,
-    )
-    .setDOMContent(
-      container,
-    )
-    .addTo(
-      map,
-    );
+    .setLngLat(coordinates)
+    .setDOMContent(container)
+    .addTo(map);
 }
 
 function showAnomalyPopup(
   map: Map,
-
-  event:
-    MapLayerMouseEvent,
+  event: MapLayerMouseEvent,
 ): void {
-  const feature =
-    event.features?.[0];
+  const feature = event.features?.[0];
+  const coordinates = featureCoordinates(event);
 
-  const coordinates =
-    featureCoordinates(
-      event,
-    );
-
-  if (
-    feature === undefined
-    || coordinates === null
-  ) {
+  if (feature === undefined || coordinates === null) {
     return;
   }
 
-  const properties =
-    feature.properties as unknown as AnomalyProperties;
+  const properties = feature.properties as unknown as AnomalyProperties;
 
-  const container =
-    document.createElement(
-      "div",
-    );
+  const container = document.createElement("div");
+  container.className = "anomaly-popup";
 
-  container.className =
-    "anomaly-popup";
+  const title = document.createElement("strong");
+  title.textContent = properties.anomalyType.replaceAll("_", " ");
 
-  const title =
-    document.createElement(
-      "strong",
-    );
+  const severity = document.createElement("span");
+  severity.textContent = `Severity: ${properties.severity}`;
 
-  title.textContent =
-    properties
-      .anomalyType
-      .replaceAll(
-        "_",
-        " ",
-      );
+  const timestamp = document.createElement("span");
+  timestamp.textContent = formatTimestamp(properties.observedAt);
 
-  const severity =
-    document.createElement(
-      "span",
-    );
+  const message = document.createElement("p");
+  message.textContent = properties.message;
 
-  severity.textContent =
-    `Severity: ${properties.severity}`;
-
-  const timestamp =
-    document.createElement(
-      "span",
-    );
-
-  timestamp.textContent =
-    formatTimestamp(
-      properties.observedAt,
-    );
-
-  const message =
-    document.createElement(
-      "p",
-    );
-
-  message.textContent =
-    properties.message;
-
-  container.append(
-    title,
-    severity,
-    timestamp,
-    message,
-  );
+  container.append(title, severity, timestamp, message);
 
   new maplibregl.Popup({
-    closeButton:
-      true,
-
-    maxWidth:
-      "360px",
+    closeButton: true,
+    maxWidth: "360px",
   })
-    .setLngLat(
-      coordinates,
-    )
-    .setDOMContent(
-      container,
-    )
-    .addTo(
-      map,
-    );
+    .setLngLat(coordinates)
+    .setDOMContent(container)
+    .addTo(map);
 }
 
 function showRiskPopup(
   map: Map,
-
-  event:
-    MapLayerMouseEvent,
+  event: MapLayerMouseEvent,
 ): void {
-  const feature =
-    event.features?.[0];
+  const feature = event.features?.[0];
+  const coordinates = featureCoordinates(event);
 
-  const coordinates =
-    featureCoordinates(
-      event,
-    );
-
-  if (
-    feature === undefined
-    || coordinates === null
-  ) {
+  if (feature === undefined || coordinates === null) {
     return;
   }
 
-  const properties =
-    feature.properties as unknown as RiskProperties;
+  const properties = feature.properties as unknown as RiskProperties;
 
-  const container =
-    document.createElement(
-      "div",
-    );
+  const container = document.createElement("div");
+  container.className = "risk-popup";
 
-  container.className =
-    "risk-popup";
-
-  const title =
-    document.createElement(
-      "strong",
-    );
-
+  const title = document.createElement("strong");
   title.textContent =
     `${properties.riskLevel.toUpperCase()} investigation priority`;
 
-  const percentile =
-    document.createElement(
-      "span",
-    );
-
+  const percentile = document.createElement("span");
   percentile.textContent =
-    `ML percentile: ${Number(
-      properties.mlPercentile,
-    ).toFixed(2)}th`;
+    `ML percentile: ${Number(properties.mlPercentile).toFixed(2)}th`;
 
-  const evidence =
-    document.createElement(
-      "span",
-    );
-
+  const evidence = document.createElement("span");
   evidence.textContent =
-    `Rules: ${properties.ruleFlagCount}`
-    + ` · severity ${properties.ruleSeverity}`
-    + " · "
-    + (
-      properties
-        .detectorAgreement
-        ? "detectors agree"
-        : "single-source evidence"
-    );
+    `Rules: ${properties.ruleFlagCount}` +
+    ` · severity ${properties.ruleSeverity}` +
+    " · " +
+    (properties.detectorAgreement
+      ? "detectors agree"
+      : "single-source evidence");
 
-  const timestamp =
-    document.createElement(
-      "span",
-    );
+  const timestamp = document.createElement("span");
+  timestamp.textContent = formatTimestamp(properties.observedAt);
 
-  timestamp.textContent =
-    formatTimestamp(
-      properties.observedAt,
-    );
+  const reasons = document.createElement("p");
+  reasons.textContent = properties.reasons;
 
-  const reasons =
-    document.createElement(
-      "p",
-    );
-
-  reasons.textContent =
-    properties.reasons;
-
-  container.append(
-    title,
-    percentile,
-    evidence,
-    timestamp,
-    reasons,
-  );
+  container.append(title, percentile, evidence, timestamp, reasons);
 
   new maplibregl.Popup({
-    closeButton:
-      true,
-
-    maxWidth:
-      "380px",
+    closeButton: true,
+    maxWidth: "380px",
   })
-    .setLngLat(
-      coordinates,
-    )
-    .setDOMContent(
-      container,
-    )
-    .addTo(
-      map,
-    );
+    .setLngLat(coordinates)
+    .setDOMContent(container)
+    .addTo(map);
+}
+
+function showCollisionPopup(
+  map: Map,
+  event: MapLayerMouseEvent,
+): void {
+  const feature = event.features?.[0];
+
+  if (feature === undefined) {
+    return;
+  }
+
+  const properties = feature.properties as unknown as CollisionProperties;
+
+  const container = document.createElement("div");
+  container.className = "risk-popup";
+
+  const title = document.createElement("strong");
+  title.textContent =
+    `${properties.riskLevel.toUpperCase()} collision encounter`;
+
+  const vessels = document.createElement("span");
+  vessels.textContent =
+    `${properties.vesselAName} (${properties.vesselAMmsi})` +
+    " ↔ " +
+    `${properties.vesselBName} (${properties.vesselBMmsi})`;
+
+  const details = document.createElement("dl");
+
+  addDetailRow(
+    details,
+    "Current separation",
+    formatDistance(Number(properties.currentDistanceNm)),
+  );
+  addDetailRow(
+    details,
+    "CPA",
+    formatDistance(Number(properties.cpaDistanceNm)),
+  );
+  addDetailRow(
+    details,
+    "TCPA",
+    formatTcpa(
+      properties.tcpaMinutes === null
+        ? null
+        : Number(properties.tcpaMinutes),
+    ),
+  );
+  addDetailRow(
+    details,
+    "Closing speed",
+    formatSignedMeasurement(Number(properties.closingSpeedKnots), "kn"),
+  );
+  addDetailRow(
+    details,
+    "Relative speed",
+    formatMeasurement(Number(properties.relativeSpeedKnots), "kn"),
+  );
+  addDetailRow(
+    details,
+    "Observed",
+    formatTimestamp(properties.observedAt),
+  );
+
+  const note = document.createElement("p");
+  note.textContent =
+    "CPA/TCPA assumes constant course and speed. " +
+    "This is an encounter-priority indicator, not a collision probability.";
+
+  container.append(title, vessels, details, note);
+
+  new maplibregl.Popup({
+    closeButton: true,
+    maxWidth: "420px",
+  })
+    .setLngLat(event.lngLat)
+    .setDOMContent(container)
+    .addTo(map);
 }
 
 export function VesselMap({
@@ -885,745 +691,593 @@ export function VesselMap({
   trajectory,
   anomalies,
   riskAssessments,
+  collisionEncounters,
   selectedAnomalyId,
   selectedRiskId,
+  selectedCollisionId,
   onSelectVessel,
   onSelectAnomaly,
   onSelectRisk,
+  onSelectCollision,
 }: VesselMapProps) {
-  const containerRef =
-    useRef<
-      HTMLDivElement | null
-    >(
-      null,
-    );
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<Map | null>(null);
 
-  const mapRef =
-    useRef<
-      Map | null
-    >(
-      null,
-    );
+  const onSelectVesselRef = useRef(onSelectVessel);
+  const onSelectAnomalyRef = useRef(onSelectAnomaly);
+  const onSelectRiskRef = useRef(onSelectRisk);
+  const onSelectCollisionRef = useRef(onSelectCollision);
 
-  const onSelectVesselRef =
-    useRef(
-      onSelectVessel,
-    );
-
-  const onSelectAnomalyRef =
-    useRef(
-      onSelectAnomaly,
-    );
-
-  const onSelectRiskRef =
-    useRef(
-      onSelectRisk,
-    );
-
-  const hasFittedBoundsRef =
-    useRef(
-      false,
-    );
+  const hasFittedBoundsRef = useRef(false);
 
   useEffect(() => {
-    onSelectVesselRef.current =
-      onSelectVessel;
+    onSelectVesselRef.current = onSelectVessel;
   }, [onSelectVessel]);
 
   useEffect(() => {
-    onSelectAnomalyRef.current =
-      onSelectAnomaly;
+    onSelectAnomalyRef.current = onSelectAnomaly;
   }, [onSelectAnomaly]);
 
   useEffect(() => {
-    onSelectRiskRef.current =
-      onSelectRisk;
+    onSelectRiskRef.current = onSelectRisk;
   }, [onSelectRisk]);
 
   useEffect(() => {
-    if (
-      containerRef.current
-        === null
-      || mapRef.current
-        !== null
-    ) {
+    onSelectCollisionRef.current = onSelectCollision;
+  }, [onSelectCollision]);
+
+  useEffect(() => {
+    if (containerRef.current === null || mapRef.current !== null) {
       return;
     }
 
-    const map =
-      new maplibregl.Map({
-        container:
-          containerRef.current,
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: MAP_STYLE,
+      center: [23.72, 37.98],
+      zoom: 5,
+    });
 
-        style:
-          MAP_STYLE,
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.addControl(new maplibregl.FullscreenControl(), "top-right");
 
-        center: [
-          23.72,
-          37.98,
-        ],
-
-        zoom:
-          5,
+    map.on("load", () => {
+      map.addSource(TRAJECTORY_SOURCE_ID, {
+        type: "geojson",
+        data: emptyLineCollection(),
       });
 
-    map.addControl(
-      new maplibregl
-        .NavigationControl(),
-      "top-right",
-    );
+      map.addLayer({
+        id: TRAJECTORY_LAYER_ID,
+        type: "line",
+        source: TRAJECTORY_SOURCE_ID,
+        paint: {
+          "line-color": "#f59e0b",
+          "line-width": 4,
+          "line-opacity": 0.85,
+        },
+      });
 
-    map.addControl(
-      new maplibregl
-        .FullscreenControl(),
-      "top-right",
-    );
+      map.addSource(COLLISION_SOURCE_ID, {
+        type: "geojson",
+        data: emptyCollisionCollection(),
+      });
 
-    map.on(
-      "load",
-      () => {
-        map.addSource(
-          TRAJECTORY_SOURCE_ID,
-          {
-            type:
-              "geojson",
+      map.addSource(COLLISION_MARKER_SOURCE_ID, {
+        type: "geojson",
+        data: emptyPointCollection<CollisionProperties>(),
+      });
 
-            data:
-              emptyLineCollection(),
-          },
-        );
-
-        map.addLayer({
-          id:
-            TRAJECTORY_LAYER_ID,
-
-          type:
-            "line",
-
-          source:
-            TRAJECTORY_SOURCE_ID,
-
-          paint: {
-            "line-color":
-              "#f59e0b",
-
-            "line-width":
-              4,
-
-            "line-opacity":
-              0.85,
-          },
-        });
-
-        map.addSource(
-          VESSEL_SOURCE_ID,
-          {
-            type:
-              "geojson",
-
-            data:
-              positionsToGeoJSON(
-                [],
-              ),
-          },
-        );
-
-        map.addLayer({
-          id:
-            VESSEL_LAYER_ID,
-
-          type:
-            "circle",
-
-          source:
-            VESSEL_SOURCE_ID,
-
-          paint: {
-            "circle-radius": [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              3,
-              4,
-              12,
-              8,
-            ],
-
-            "circle-color":
-              "#22d3ee",
-
-            "circle-stroke-color":
-              "#083344",
-
-            "circle-stroke-width":
-              2,
-
-            "circle-opacity":
-              0.9,
-          },
-        });
-
-        map.addLayer({
-          id:
-            SELECTED_VESSEL_LAYER_ID,
-
-          type:
-            "circle",
-
-          source:
-            VESSEL_SOURCE_ID,
-
-          filter: [
-            "==",
-            [
-              "get",
-              "mmsi",
-            ],
-            NO_SELECTED_VESSEL,
+      map.addLayer({
+        id: COLLISION_LAYER_ID,
+        type: "line",
+        source: COLLISION_SOURCE_ID,
+        paint: {
+          "line-color": [
+            "match",
+            ["get", "riskLevel"],
+            "critical",
+            "#dc2626",
+            "high",
+            "#f97316",
+            "medium",
+            "#eab308",
+            "#64748b",
           ],
+          "line-width": [
+            "match",
+            ["get", "riskLevel"],
+            "critical",
+            8,
+            "high",
+            6,
+            "medium",
+            5,
+            4,
+          ],
+          "line-opacity": 1,
+          "line-dasharray": [2, 1],
+        },
+      });
 
-          paint: {
-            "circle-radius": [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              3,
-              8,
-              12,
-              14,
-            ],
+      map.addLayer({
+        id: SELECTED_COLLISION_LAYER_ID,
+        type: "line",
+        source: COLLISION_SOURCE_ID,
+        filter: [
+          "==",
+          ["get", "id"],
+          NO_SELECTED_COLLISION,
+        ],
+        paint: {
+          "line-color": "#22d3ee",
+          "line-width": 7,
+          "line-opacity": 1,
+        },
+      });
 
-            "circle-color":
-              "#f59e0b",
+      map.addLayer({
+        id: COLLISION_HITBOX_LAYER_ID,
+        type: "line",
+        source: COLLISION_SOURCE_ID,
+        paint: {
+          "line-color": "#000000",
+          "line-width": 16,
+          "line-opacity": 0,
+        },
+      });
 
-            "circle-stroke-color":
-              "#ffffff",
+      map.addSource(VESSEL_SOURCE_ID, {
+        type: "geojson",
+        data: positionsToGeoJSON([]),
+      });
 
-            "circle-stroke-width":
-              3,
+      map.addLayer({
+        id: VESSEL_LAYER_ID,
+        type: "circle",
+        source: VESSEL_SOURCE_ID,
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            3,
+            4,
+            12,
+            8,
+          ],
+          "circle-color": "#22d3ee",
+          "circle-stroke-color": "#083344",
+          "circle-stroke-width": 2,
+          "circle-opacity": 0.9,
+        },
+      });
 
-            "circle-opacity":
-              1,
-          },
-        });
+      map.addLayer({
+        id: SELECTED_VESSEL_LAYER_ID,
+        type: "circle",
+        source: VESSEL_SOURCE_ID,
+        filter: [
+          "==",
+          ["get", "mmsi"],
+          NO_SELECTED_VESSEL,
+        ],
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            3,
+            8,
+            12,
+            14,
+          ],
+          "circle-color": "#f59e0b",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 3,
+          "circle-opacity": 1,
+        },
+      });
 
-        map.addSource(
-          RISK_SOURCE_ID,
-          {
-            type:
-              "geojson",
+      map.addSource(RISK_SOURCE_ID, {
+        type: "geojson",
+        data: emptyPointCollection<RiskProperties>(),
+      });
 
-            data:
-              emptyPointCollection<
-                RiskProperties
-              >(),
-          },
-        );
+      map.addLayer({
+        id: RISK_LAYER_ID,
+        type: "circle",
+        source: RISK_SOURCE_ID,
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            3,
+            7,
+            12,
+            11,
+          ],
+          "circle-color": [
+            "match",
+            ["get", "riskLevel"],
+            "critical",
+            "#dc2626",
+            "high",
+            "#f97316",
+            "medium",
+            "#eab308",
+            "#64748b",
+          ],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
+          "circle-opacity": 0.65,
+        },
+      });
 
-        map.addLayer({
-          id:
-            RISK_LAYER_ID,
+      map.addLayer({
+        id: SELECTED_RISK_LAYER_ID,
+        type: "circle",
+        source: RISK_SOURCE_ID,
+        filter: [
+          "==",
+          ["get", "id"],
+          NO_SELECTED_RISK,
+        ],
+        paint: {
+          "circle-radius": 15,
+          "circle-color": "rgba(0, 0, 0, 0)",
+          "circle-stroke-color": "#22d3ee",
+          "circle-stroke-width": 4,
+          "circle-opacity": 1,
+        },
+      });
 
-          type:
-            "circle",
+      map.addSource(ANOMALY_SOURCE_ID, {
+        type: "geojson",
+        data: emptyPointCollection<AnomalyProperties>(),
+      });
 
-          source:
-            RISK_SOURCE_ID,
-
-          paint: {
-            "circle-radius": [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              3,
-              7,
-              12,
-              11,
-            ],
-
-            "circle-color": [
-              "match",
+      map.addLayer({
+        id: ANOMALY_LAYER_ID,
+        type: "circle",
+        source: ANOMALY_SOURCE_ID,
+        paint: {
+          "circle-radius": 6,
+          "circle-color": [
+            "match",
+            [
+              "downcase",
               [
-                "get",
-                "riskLevel",
+                "to-string",
+                ["get", "severity"],
               ],
-
-              "critical",
-              "#dc2626",
-
-              "high",
-              "#f97316",
-
-              "medium",
-              "#eab308",
-
-              "#64748b",
             ],
-
-            "circle-stroke-color":
-              "#ffffff",
-
-            "circle-stroke-width":
-              2,
-
-            "circle-opacity":
-              0.65,
-          },
-        });
-
-        map.addLayer({
-          id:
-            SELECTED_RISK_LAYER_ID,
-
-          type:
-            "circle",
-
-          source:
-            RISK_SOURCE_ID,
-
-          filter: [
-            "==",
-            [
-              "get",
-              "id",
-            ],
-            NO_SELECTED_RISK,
+            "critical",
+            "#dc2626",
+            "high",
+            "#f97316",
+            "warning",
+            "#facc15",
+            "#a855f7",
           ],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
+          "circle-opacity": 0.95,
+        },
+      });
 
-          paint: {
-            "circle-radius":
-              15,
+      map.addLayer({
+        id: SELECTED_ANOMALY_LAYER_ID,
+        type: "circle",
+        source: ANOMALY_SOURCE_ID,
+        filter: [
+          "==",
+          ["get", "id"],
+          NO_SELECTED_ANOMALY,
+        ],
+        paint: {
+          "circle-radius": 12,
+          "circle-color": "rgba(0, 0, 0, 0)",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 4,
+          "circle-opacity": 1,
+        },
+      });
 
-            "circle-color":
-              "rgba(0, 0, 0, 0)",
-
-            "circle-stroke-color":
-              "#22d3ee",
-
-            "circle-stroke-width":
-              4,
-
-            "circle-opacity":
-              1,
-          },
-        });
-
-        map.addSource(
-          ANOMALY_SOURCE_ID,
-          {
-            type:
-              "geojson",
-
-            data:
-              emptyPointCollection<
-                AnomalyProperties
-              >(),
-          },
-        );
-
-        map.addLayer({
-          id:
-            ANOMALY_LAYER_ID,
-
-          type:
-            "circle",
-
-          source:
-            ANOMALY_SOURCE_ID,
-
-          paint: {
-            "circle-radius":
-              6,
-
-            "circle-color": [
-              "match",
-
-              [
-                "downcase",
-                [
-                  "to-string",
-                  [
-                    "get",
-                    "severity",
-                  ],
-                ],
-              ],
-
-              "critical",
-              "#dc2626",
-
-              "high",
-              "#f97316",
-
-              "warning",
-              "#facc15",
-
-              "#a855f7",
-            ],
-
-            "circle-stroke-color":
-              "#ffffff",
-
-            "circle-stroke-width":
-              2,
-
-            "circle-opacity":
-              0.95,
-          },
-        });
-
-        map.addLayer({
-          id:
-            SELECTED_ANOMALY_LAYER_ID,
-
-          type:
-            "circle",
-
-          source:
-            ANOMALY_SOURCE_ID,
-
-          filter: [
-            "==",
-            [
-              "get",
-              "id",
-            ],
-            NO_SELECTED_ANOMALY,
+      map.addLayer({
+        id: COLLISION_MARKER_LAYER_ID,
+        type: "circle",
+        source: COLLISION_MARKER_SOURCE_ID,
+        paint: {
+          "circle-radius": [
+            "match",
+            ["get", "riskLevel"],
+            "critical",
+            11,
+            "high",
+            9,
+            "medium",
+            8,
+            7,
           ],
+          "circle-color": [
+            "match",
+            ["get", "riskLevel"],
+            "critical",
+            "#dc2626",
+            "high",
+            "#f97316",
+            "medium",
+            "#eab308",
+            "#64748b",
+          ],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 3,
+          "circle-opacity": 0.95,
+        },
+      });
 
-          paint: {
-            "circle-radius":
-              12,
+      map.addLayer({
+        id: SELECTED_COLLISION_MARKER_LAYER_ID,
+        type: "circle",
+        source: COLLISION_MARKER_SOURCE_ID,
+        filter: [
+          "==",
+          ["get", "id"],
+          NO_SELECTED_COLLISION,
+        ],
+        paint: {
+          "circle-radius": 16,
+          "circle-color": "rgba(0, 0, 0, 0)",
+          "circle-stroke-color": "#22d3ee",
+          "circle-stroke-width": 5,
+          "circle-opacity": 1,
+        },
+      });
 
-            "circle-color":
-              "rgba(0, 0, 0, 0)",
+      map.addLayer({
+        id: COLLISION_MARKER_HITBOX_LAYER_ID,
+        type: "circle",
+        source: COLLISION_MARKER_SOURCE_ID,
+        paint: {
+          "circle-radius": 18,
+          "circle-color": "#000000",
+          "circle-opacity": 0.001,
+        },
+      });
 
-            "circle-stroke-color":
-              "#ffffff",
+      map.on(
+        "click",
+        VESSEL_LAYER_ID,
+        (event: MapLayerMouseEvent) => {
+          showVesselPopup(
+            map,
+            event,
+            onSelectVesselRef.current,
+          );
+        },
+      );
 
-            "circle-stroke-width":
-              4,
-
-            "circle-opacity":
-              1,
-          },
-        });
-
-        map.on(
-          "click",
-          VESSEL_LAYER_ID,
-          (
-            event:
-              MapLayerMouseEvent,
-          ) => {
-            showVesselPopup(
-              map,
-              event,
-              onSelectVesselRef
-                .current,
-            );
-          },
-        );
-
-        map.on(
-          "click",
-          RISK_LAYER_ID,
-          (
-            event:
-              MapLayerMouseEvent,
-          ) => {
-            const riskId =
-              Number(
-                event.features?.[0]
-                  ?.properties
-                  ?.id,
-              );
-
-            if (
-              Number.isFinite(
-                riskId,
-              )
-            ) {
-              onSelectRiskRef
-                .current(
-                  riskId,
-                );
-            }
-
-            showRiskPopup(
-              map,
-              event,
-            );
-          },
-        );
-
-        map.on(
-          "click",
-          ANOMALY_LAYER_ID,
-          (
-            event:
-              MapLayerMouseEvent,
-          ) => {
-            const anomalyId =
-              Number(
-                event.features?.[0]
-                  ?.properties
-                  ?.id,
-              );
-
-            if (
-              Number.isFinite(
-                anomalyId,
-              )
-            ) {
-              onSelectAnomalyRef
-                .current(
-                  anomalyId,
-                );
-            }
-
-            showAnomalyPopup(
-              map,
-              event,
-            );
-          },
-        );
-
-        for (
-          const layerId
-          of [
-            VESSEL_LAYER_ID,
-            RISK_LAYER_ID,
-            ANOMALY_LAYER_ID,
-          ]
-        ) {
-          map.on(
-            "mouseenter",
-            layerId,
-            () => {
-              map.getCanvas()
-                .style.cursor =
-                "pointer";
-            },
+      map.on(
+        "click",
+        RISK_LAYER_ID,
+        (event: MapLayerMouseEvent) => {
+          const riskId = Number(
+            event.features?.[0]?.properties?.id,
           );
 
-          map.on(
-            "mouseleave",
-            layerId,
-            () => {
-              map.getCanvas()
-                .style.cursor =
-                "";
-            },
-          );
-        }
-      },
-    );
+          if (Number.isFinite(riskId)) {
+            onSelectRiskRef.current(riskId);
+          }
 
-    mapRef.current =
-      map;
+          showRiskPopup(map, event);
+        },
+      );
+
+      map.on(
+        "click",
+        ANOMALY_LAYER_ID,
+        (event: MapLayerMouseEvent) => {
+          const anomalyId = Number(
+            event.features?.[0]?.properties?.id,
+          );
+
+          if (Number.isFinite(anomalyId)) {
+            onSelectAnomalyRef.current(anomalyId);
+          }
+
+          showAnomalyPopup(map, event);
+        },
+      );
+
+      map.on(
+        "click",
+        COLLISION_HITBOX_LAYER_ID,
+        (event: MapLayerMouseEvent) => {
+          const collisionId = Number(
+            event.features?.[0]?.properties?.id,
+          );
+
+          if (Number.isFinite(collisionId)) {
+            onSelectCollisionRef.current(collisionId);
+          }
+
+          showCollisionPopup(map, event);
+        },
+      );
+
+      map.on(
+        "click",
+        COLLISION_MARKER_HITBOX_LAYER_ID,
+        (event: MapLayerMouseEvent) => {
+          const collisionId = Number(
+            event.features?.[0]?.properties?.id,
+          );
+
+          if (Number.isFinite(collisionId)) {
+            onSelectCollisionRef.current(collisionId);
+          }
+
+          showCollisionPopup(map, event);
+        },
+      );
+
+      for (const layerId of [
+        VESSEL_LAYER_ID,
+        RISK_LAYER_ID,
+        ANOMALY_LAYER_ID,
+        COLLISION_HITBOX_LAYER_ID,
+        COLLISION_MARKER_HITBOX_LAYER_ID,
+      ]) {
+        map.on("mouseenter", layerId, () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+
+        map.on("mouseleave", layerId, () => {
+          map.getCanvas().style.cursor = "";
+        });
+      }
+    });
+
+    mapRef.current = map;
 
     return () => {
       map.remove();
-
-      mapRef.current =
-        null;
-
-      hasFittedBoundsRef.current =
-        false;
+      mapRef.current = null;
+      hasFittedBoundsRef.current = false;
     };
   }, []);
 
   useEffect(() => {
-    const map =
-      mapRef.current;
+    const map = mapRef.current;
 
-    if (
-      map === null
-    ) {
+    if (map === null) {
       return;
     }
 
-    const update =
-      () => {
-        const source =
-          map.getSource(
-            VESSEL_SOURCE_ID,
-          ) as
-          | GeoJSONSource
-          | undefined;
+    const update = () => {
+      const source = map.getSource(
+        VESSEL_SOURCE_ID,
+      ) as GeoJSONSource | undefined;
 
-        if (
-          source === undefined
-        ) {
-          return;
-        }
+      if (source === undefined) {
+        return;
+      }
 
-        source.setData(
-          positionsToGeoJSON(
-            positions,
-          ),
-        );
+      source.setData(
+        positionsToGeoJSON(positions),
+      );
 
-        if (
-          positions.length
-            === 0
-          || hasFittedBoundsRef
-            .current
-        ) {
-          return;
-        }
+      if (
+        positions.length === 0 ||
+        hasFittedBoundsRef.current
+      ) {
+        return;
+      }
 
-        if (
-          positions.length
-          === 1
-        ) {
-          map.flyTo({
-            center: [
-              positions[0]
-                .longitude,
+      if (positions.length === 1) {
+        map.flyTo({
+          center: [
+            positions[0].longitude,
+            positions[0].latitude,
+          ],
+          zoom: 10,
+        });
 
-              positions[0]
-                .latitude,
-            ],
+        hasFittedBoundsRef.current = true;
+        return;
+      }
 
-            zoom:
-              10,
-          });
+      const bounds = new maplibregl.LngLatBounds();
 
-          hasFittedBoundsRef.current =
-            true;
+      positions.forEach((position) =>
+        bounds.extend([
+          position.longitude,
+          position.latitude,
+        ]),
+      );
 
-          return;
-        }
+      map.fitBounds(bounds, {
+        padding: 70,
+        maxZoom: 11,
+        duration: 800,
+      });
 
-        const bounds =
-          new maplibregl
-            .LngLatBounds();
-
-        positions.forEach(
-          (position) =>
-            bounds.extend([
-              position.longitude,
-              position.latitude,
-            ]),
-        );
-
-        map.fitBounds(
-          bounds,
-          {
-            padding:
-              70,
-
-            maxZoom:
-              11,
-
-            duration:
-              800,
-          },
-        );
-
-        hasFittedBoundsRef.current =
-          true;
-      };
+      hasFittedBoundsRef.current = true;
+    };
 
     if (
-      map.isStyleLoaded()
-      && map.getSource(
-        VESSEL_SOURCE_ID,
-      )
+      map.isStyleLoaded() &&
+      map.getSource(VESSEL_SOURCE_ID)
     ) {
       update();
     } else {
-      map.once(
-        "load",
-        update,
-      );
+      map.once("load", update);
     }
   }, [positions]);
 
   useEffect(() => {
-    const map =
-      mapRef.current;
+    const map = mapRef.current;
 
-    if (
-      map === null
-    ) {
+    if (map === null) {
       return;
     }
 
-    const update =
-      () => {
-        if (
-          map.getLayer(
-            SELECTED_VESSEL_LAYER_ID,
-          ) === undefined
-        ) {
-          return;
-        }
-
-        map.setFilter(
+    const update = () => {
+      if (
+        map.getLayer(
           SELECTED_VESSEL_LAYER_ID,
-          [
-            "==",
-            [
-              "get",
-              "mmsi",
-            ],
-            selectedMmsi
-            ?? NO_SELECTED_VESSEL,
-          ],
-        );
+        ) === undefined
+      ) {
+        return;
+      }
 
-        if (
-          selectedMmsi
-          === null
-        ) {
-          return;
-        }
+      map.setFilter(
+        SELECTED_VESSEL_LAYER_ID,
+        [
+          "==",
+          ["get", "mmsi"],
+          selectedMmsi ??
+            NO_SELECTED_VESSEL,
+        ],
+      );
 
-        const position =
-          positions.find(
-            (item) =>
-              item.mmsi
-              === selectedMmsi,
-          );
+      if (selectedMmsi === null) {
+        return;
+      }
 
-        if (
-          position === undefined
-        ) {
-          return;
-        }
+      const position = positions.find(
+        (item) =>
+          item.mmsi === selectedMmsi,
+      );
 
-        map.easeTo({
-          center: [
-            position.longitude,
-            position.latitude,
-          ],
+      if (position === undefined) {
+        return;
+      }
 
-          zoom:
-            Math.max(
-              map.getZoom(),
-              9,
-            ),
-
-          duration:
-            700,
-        });
-      };
+      map.easeTo({
+        center: [
+          position.longitude,
+          position.latitude,
+        ],
+        zoom: Math.max(
+          map.getZoom(),
+          9,
+        ),
+        duration: 700,
+      });
+    };
 
     if (
-      map.isStyleLoaded()
-      && map.getLayer(
+      map.isStyleLoaded() &&
+      map.getLayer(
         SELECTED_VESSEL_LAYER_ID,
       )
     ) {
       update();
     } else {
-      map.once(
-        "load",
-        update,
-      );
+      map.once("load", update);
     }
   }, [
     positions,
@@ -1631,217 +1285,314 @@ export function VesselMap({
   ]);
 
   useEffect(() => {
-    const map =
-      mapRef.current;
+    const map = mapRef.current;
 
-    if (
-      map === null
-    ) {
+    if (map === null) {
       return;
     }
 
-    const update =
-      () => {
-        const source =
-          map.getSource(
-            TRAJECTORY_SOURCE_ID,
-          ) as GeoJSONSource | undefined;
+    const update = () => {
+      const source = map.getSource(
+        TRAJECTORY_SOURCE_ID,
+      ) as GeoJSONSource | undefined;
 
-        if (
-          source === undefined
-        ) {
-          return;
-        }
+      if (source === undefined) {
+        return;
+      }
 
-        const line =
-          trajectoryToLine(
-            trajectory,
-          );
+      const line =
+        trajectoryToLine(trajectory);
 
-        source.setData(
-          line,
-        );
+      source.setData(line);
 
-        const coordinates =
-          line.features[0]
-            ?.geometry
-            .coordinates;
+      const coordinates =
+        line.features[0]
+          ?.geometry
+          .coordinates;
 
-        if (
-          coordinates
-            === undefined
-          || coordinates.length
-            < 2
-        ) {
-          return;
-        }
+      if (
+        coordinates === undefined ||
+        coordinates.length < 2
+      ) {
+        return;
+      }
 
-        const bounds =
-          new maplibregl
-            .LngLatBounds();
+      const bounds =
+        new maplibregl.LngLatBounds();
 
-        coordinates.forEach(
-          (coordinate) =>
-            bounds.extend([
-              coordinate[0],
-              coordinate[1],
-            ]),
-        );
+      coordinates.forEach(
+        (coordinate) =>
+          bounds.extend([
+            coordinate[0],
+            coordinate[1],
+          ]),
+      );
 
-        map.fitBounds(
-          bounds,
-          {
-            padding:
-              90,
-
-            maxZoom:
-              12,
-
-            duration:
-              700,
-          },
-        );
-      };
+      map.fitBounds(bounds, {
+        padding: 90,
+        maxZoom: 12,
+        duration: 700,
+      });
+    };
 
     if (
-      map.isStyleLoaded()
-      && map.getSource(
+      map.isStyleLoaded() &&
+      map.getSource(
         TRAJECTORY_SOURCE_ID,
       )
     ) {
       update();
     } else {
-      map.once(
-        "load",
-        update,
-      );
+      map.once("load", update);
     }
   }, [trajectory]);
 
   useEffect(() => {
-    const map =
-      mapRef.current;
+    const map = mapRef.current;
 
-    if (
-      map === null
-    ) {
+    if (map === null) {
       return;
     }
 
-    const update =
-      () => {
-        const source =
-          map.getSource(
-            RISK_SOURCE_ID,
-          ) as
-            GeoJSONSource
-            | undefined;
+    const update = () => {
+      const lineSource = map.getSource(
+        COLLISION_SOURCE_ID,
+      ) as GeoJSONSource | undefined;
 
-        source?.setData(
-          risksToGeoJSON(
-            riskAssessments,
-          ),
-        );
-      };
+      const markerSource = map.getSource(
+        COLLISION_MARKER_SOURCE_ID,
+      ) as GeoJSONSource | undefined;
+
+      lineSource?.setData(
+        collisionsToGeoJSON(
+          collisionEncounters,
+        ),
+      );
+
+      markerSource?.setData(
+        collisionMarkersToGeoJSON(
+          collisionEncounters,
+        ),
+      );
+    };
 
     if (
-      map.isStyleLoaded()
-      && map.getSource(
-        RISK_SOURCE_ID,
+      map.isStyleLoaded() &&
+      map.getSource(
+        COLLISION_SOURCE_ID,
+      ) &&
+      map.getSource(
+        COLLISION_MARKER_SOURCE_ID,
       )
     ) {
       update();
     } else {
-      map.once(
-        "load",
-        update,
+      map.once("load", update);
+    }
+  }, [collisionEncounters]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+
+    if (map === null) {
+      return;
+    }
+
+    const update = () => {
+      if (
+        map.getLayer(
+          SELECTED_COLLISION_LAYER_ID,
+        ) === undefined ||
+        map.getLayer(
+          SELECTED_COLLISION_MARKER_LAYER_ID,
+        ) === undefined
+      ) {
+        return;
+      }
+
+      map.setFilter(
+        SELECTED_COLLISION_LAYER_ID,
+        [
+          "==",
+          ["get", "id"],
+          selectedCollisionId ??
+            NO_SELECTED_COLLISION,
+        ],
       );
+
+      map.setFilter(
+        SELECTED_COLLISION_MARKER_LAYER_ID,
+        [
+          "==",
+          ["get", "id"],
+          selectedCollisionId ??
+            NO_SELECTED_COLLISION,
+        ],
+      );
+
+      if (
+        selectedCollisionId === null
+      ) {
+        return;
+      }
+
+      const encounter =
+        collisionEncounters.find(
+          (item) =>
+            item.id ===
+            selectedCollisionId,
+        );
+
+      if (encounter === undefined) {
+        return;
+      }
+
+      const vesselA: [number, number] = [
+        encounter.vessel_a.longitude,
+        encounter.vessel_a.latitude,
+      ];
+
+      const vesselB: [number, number] = [
+        encounter.vessel_b.longitude,
+        encounter.vessel_b.latitude,
+      ];
+
+      if (
+        vesselA[0] === vesselB[0] &&
+        vesselA[1] === vesselB[1]
+      ) {
+        map.flyTo({
+          center: vesselA,
+          zoom: Math.max(
+            map.getZoom(),
+            13,
+          ),
+          duration: 700,
+        });
+
+        return;
+      }
+
+      const bounds =
+        new maplibregl.LngLatBounds();
+
+      bounds.extend(vesselA);
+      bounds.extend(vesselB);
+
+      map.fitBounds(bounds, {
+        padding: 120,
+        maxZoom: 13,
+        duration: 800,
+      });
+    };
+
+    if (
+      map.isStyleLoaded() &&
+      map.getLayer(
+        SELECTED_COLLISION_LAYER_ID,
+      )
+    ) {
+      update();
+    } else {
+      map.once("load", update);
+    }
+  }, [
+    collisionEncounters,
+    selectedCollisionId,
+  ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+
+    if (map === null) {
+      return;
+    }
+
+    const update = () => {
+      const source = map.getSource(
+        RISK_SOURCE_ID,
+      ) as GeoJSONSource | undefined;
+
+      source?.setData(
+        risksToGeoJSON(
+          riskAssessments,
+        ),
+      );
+    };
+
+    if (
+      map.isStyleLoaded() &&
+      map.getSource(RISK_SOURCE_ID)
+    ) {
+      update();
+    } else {
+      map.once("load", update);
     }
   }, [riskAssessments]);
 
   useEffect(() => {
-    const map =
-      mapRef.current;
+    const map = mapRef.current;
 
-    if (
-      map === null
-    ) {
+    if (map === null) {
       return;
     }
 
-    const update =
-      () => {
-        if (
-          map.getLayer(
-            SELECTED_RISK_LAYER_ID,
-          ) === undefined
-        ) {
-          return;
-        }
-
-        map.setFilter(
+    const update = () => {
+      if (
+        map.getLayer(
           SELECTED_RISK_LAYER_ID,
-          [
-            "==",
-            [
-              "get",
-              "id",
-            ],
-            selectedRiskId
-            ?? NO_SELECTED_RISK,
-          ],
+        ) === undefined
+      ) {
+        return;
+      }
+
+      map.setFilter(
+        SELECTED_RISK_LAYER_ID,
+        [
+          "==",
+          ["get", "id"],
+          selectedRiskId ??
+            NO_SELECTED_RISK,
+        ],
+      );
+
+      if (selectedRiskId === null) {
+        return;
+      }
+
+      const assessment =
+        riskAssessments.find(
+          (item) =>
+            item.id ===
+            selectedRiskId,
         );
 
-        if (
-          selectedRiskId
-          === null
-        ) {
-          return;
-        }
+      if (assessment === undefined) {
+        return;
+      }
 
-        const assessment =
-          riskAssessments.find(
-            (item) =>
-              item.id
-              === selectedRiskId,
-          );
-
-        if (
-          assessment
-          === undefined
-        ) {
-          return;
-        }
-
-        map.flyTo({
-          center: [
-            assessment.longitude,
-            assessment.latitude,
-          ],
-
-          zoom:
-            Math.max(
-              map.getZoom(),
-              13,
-            ),
-
-          duration:
-            700,
-        });
-      };
+      map.flyTo({
+        center: [
+          assessment.longitude,
+          assessment.latitude,
+        ],
+        zoom: Math.max(
+          map.getZoom(),
+          13,
+        ),
+        duration: 700,
+      });
+    };
 
     if (
-      map.isStyleLoaded()
-      && map.getLayer(
+      map.isStyleLoaded() &&
+      map.getLayer(
         SELECTED_RISK_LAYER_ID,
       )
     ) {
       update();
     } else {
-      map.once(
-        "load",
-        update,
-      );
+      map.once("load", update);
     }
   }, [
     riskAssessments,
@@ -1849,134 +1600,101 @@ export function VesselMap({
   ]);
 
   useEffect(() => {
-    const map =
-      mapRef.current;
+    const map = mapRef.current;
 
-    if (
-      map === null
-    ) {
+    if (map === null) {
       return;
     }
 
-    const update =
-      () => {
-        const source =
-          map.getSource(
-            ANOMALY_SOURCE_ID,
-          );
+    const update = () => {
+      const source = map.getSource(
+        ANOMALY_SOURCE_ID,
+      ) as GeoJSONSource | undefined;
 
-        if (
-          source === undefined
-        ) {
-          return;
-        }
-
-        (
-          source as GeoJSONSource
-        ).setData(
-          anomaliesToGeoJSON(
-            anomalies,
-          ),
-        );
-      };
+      source?.setData(
+        anomaliesToGeoJSON(
+          anomalies,
+        ),
+      );
+    };
 
     if (
-      map.isStyleLoaded()
-      && map.getSource(
+      map.isStyleLoaded() &&
+      map.getSource(
         ANOMALY_SOURCE_ID,
       )
     ) {
       update();
     } else {
-      map.once(
-        "load",
-        update,
-      );
+      map.once("load", update);
     }
   }, [anomalies]);
 
   useEffect(() => {
-    const map =
-      mapRef.current;
+    const map = mapRef.current;
 
-    if (
-      map === null
-    ) {
+    if (map === null) {
       return;
     }
 
-    const update =
-      () => {
-        if (
-          map.getLayer(
-            SELECTED_ANOMALY_LAYER_ID,
-          ) === undefined
-        ) {
-          return;
-        }
-
-        map.setFilter(
+    const update = () => {
+      if (
+        map.getLayer(
           SELECTED_ANOMALY_LAYER_ID,
-          [
-            "==",
-            [
-              "get",
-              "id",
-            ],
-            selectedAnomalyId
-            ?? NO_SELECTED_ANOMALY,
-          ],
+        ) === undefined
+      ) {
+        return;
+      }
+
+      map.setFilter(
+        SELECTED_ANOMALY_LAYER_ID,
+        [
+          "==",
+          ["get", "id"],
+          selectedAnomalyId ??
+            NO_SELECTED_ANOMALY,
+        ],
+      );
+
+      if (
+        selectedAnomalyId === null
+      ) {
+        return;
+      }
+
+      const anomaly =
+        anomalies.find(
+          (item) =>
+            item.id ===
+            selectedAnomalyId,
         );
 
-        if (
-          selectedAnomalyId
-          === null
-        ) {
-          return;
-        }
+      if (anomaly === undefined) {
+        return;
+      }
 
-        const anomaly =
-          anomalies.find(
-            (item) =>
-              item.id
-              === selectedAnomalyId,
-          );
-
-        if (
-          anomaly === undefined
-        ) {
-          return;
-        }
-
-        map.flyTo({
-          center: [
-            anomaly.longitude,
-            anomaly.latitude,
-          ],
-
-          zoom:
-            Math.max(
-              map.getZoom(),
-              13,
-            ),
-
-          duration:
-            700,
-        });
-      };
+      map.flyTo({
+        center: [
+          anomaly.longitude,
+          anomaly.latitude,
+        ],
+        zoom: Math.max(
+          map.getZoom(),
+          13,
+        ),
+        duration: 700,
+      });
+    };
 
     if (
-      map.isStyleLoaded()
-      && map.getLayer(
+      map.isStyleLoaded() &&
+      map.getLayer(
         SELECTED_ANOMALY_LAYER_ID,
       )
     ) {
       update();
     } else {
-      map.once(
-        "load",
-        update,
-      );
+      map.once("load", update);
     }
   }, [
     anomalies,
@@ -1985,13 +1703,9 @@ export function VesselMap({
 
   return (
     <div
-      ref={
-        containerRef
-      }
+      ref={containerRef}
       className="vessel-map"
-      aria-label={
-        "Map of recent vessel positions"
-      }
+      aria-label="Map of recent vessel positions and collision encounters"
     />
   );
 }
