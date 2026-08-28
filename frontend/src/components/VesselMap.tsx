@@ -1347,50 +1347,186 @@ export function VesselMap({
     }
   }, [trajectory]);
 
-  useEffect(() => {
-    const map = mapRef.current;
+useEffect(() => {
+  const map = mapRef.current;
 
-    if (map === null) {
-      return;
-    }
+  if (map === null) {
+    return;
+  }
 
-    const update = () => {
-      const lineSource = map.getSource(
-        COLLISION_SOURCE_ID,
-      ) as GeoJSONSource | undefined;
+  const updateCollisionSources = (): boolean => {
+    const lineSource = map.getSource(
+      COLLISION_SOURCE_ID,
+    ) as GeoJSONSource | undefined;
 
-      const markerSource = map.getSource(
-        COLLISION_MARKER_SOURCE_ID,
-      ) as GeoJSONSource | undefined;
+    const markerSource = map.getSource(
+      COLLISION_MARKER_SOURCE_ID,
+    ) as GeoJSONSource | undefined;
 
-      lineSource?.setData(
-        collisionsToGeoJSON(
-          collisionEncounters,
-        ),
-      );
-
-      markerSource?.setData(
-        collisionMarkersToGeoJSON(
-          collisionEncounters,
-        ),
-      );
-    };
-
+    /*
+     * If the sources do not exist yet,
+     * tell the caller to try again on
+     * the next style update.
+     */
     if (
-      map.isStyleLoaded() &&
-      map.getSource(
-        COLLISION_SOURCE_ID,
-      ) &&
-      map.getSource(
-        COLLISION_MARKER_SOURCE_ID,
-      )
+      lineSource === undefined ||
+      markerSource === undefined
     ) {
-      update();
-    } else {
-      map.once("load", update);
+      return false;
     }
-  }, [collisionEncounters]);
 
+    /*
+     * Replace the map data completely.
+     *
+     * When collisionEncounters is [],
+     * these become empty FeatureCollections,
+     * which removes all historical collision
+     * geometry from the map.
+     */
+    lineSource.setData(
+      collisionsToGeoJSON(
+        collisionEncounters,
+      ),
+    );
+
+    markerSource.setData(
+      collisionMarkersToGeoJSON(
+        collisionEncounters,
+      ),
+    );
+
+    const hasCollisions =
+      collisionEncounters.length > 0;
+
+    const visibility =
+      hasCollisions
+        ? "visible"
+        : "none";
+
+    /*
+     * Explicitly synchronize every
+     * collision-related layer.
+     *
+     * This prevents stale MapLibre
+     * rendering from surviving while
+     * playback moves between frames.
+     */
+    const collisionLayerIds = [
+      COLLISION_LAYER_ID,
+      SELECTED_COLLISION_LAYER_ID,
+      COLLISION_HITBOX_LAYER_ID,
+      COLLISION_MARKER_LAYER_ID,
+      SELECTED_COLLISION_MARKER_LAYER_ID,
+      COLLISION_MARKER_HITBOX_LAYER_ID,
+    ];
+
+    collisionLayerIds.forEach(
+      (layerId) => {
+        if (
+          map.getLayer(
+            layerId,
+          ) !== undefined
+        ) {
+          map.setLayoutProperty(
+            layerId,
+            "visibility",
+            visibility,
+          );
+        }
+      },
+    );
+
+    /*
+     * If there are no encounters,
+     * also clear any selected collision
+     * filters explicitly.
+     */
+    if (
+      !hasCollisions
+    ) {
+      if (
+        map.getLayer(
+          SELECTED_COLLISION_LAYER_ID,
+        ) !== undefined
+      ) {
+        map.setFilter(
+          SELECTED_COLLISION_LAYER_ID,
+          [
+            "==",
+            ["get", "id"],
+            NO_SELECTED_COLLISION,
+          ],
+        );
+      }
+
+      if (
+        map.getLayer(
+          SELECTED_COLLISION_MARKER_LAYER_ID,
+        ) !== undefined
+      ) {
+        map.setFilter(
+          SELECTED_COLLISION_MARKER_LAYER_ID,
+          [
+            "==",
+            ["get", "id"],
+            NO_SELECTED_COLLISION,
+          ],
+        );
+      }
+    }
+
+    /*
+     * Normally setData() triggers a redraw,
+     * but forcing one here makes playback
+     * updates deterministic.
+     */
+    map.triggerRepaint();
+
+    return true;
+  };
+
+  /*
+   * Normally the sources already exist,
+   * so this succeeds immediately.
+   */
+  if (
+    updateCollisionSources()
+  ) {
+    return;
+  }
+
+  /*
+   * Do NOT use map.once("load") here.
+   *
+   * The map may already have emitted its
+   * load event. Instead wait for styledata,
+   * which can still occur after initial load.
+   */
+  const handleStyleData = () => {
+    if (
+      updateCollisionSources()
+    ) {
+      map.off(
+        "styledata",
+        handleStyleData,
+      );
+    }
+  };
+
+  map.on(
+    "styledata",
+    handleStyleData,
+  );
+
+  return () => {
+    map.off(
+      "styledata",
+      handleStyleData,
+    );
+  };
+}, [
+  collisionEncounters,
+]);
   useEffect(() => {
     const map = mapRef.current;
 

@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import "./App.css";
 import "./components/risk.css";
@@ -8,6 +14,7 @@ import {
   fetchCollisionEncounters,
   fetchVesselCollisionEncounters,
 } from "./api/collisions";
+
 import {
   fetchRecentPositions,
   fetchVesselAnomalies,
@@ -26,6 +33,7 @@ import type {
 
 import { CollisionInvestigation } from "./components/CollisionInvestigation";
 import { CollisionQueue } from "./components/CollisionQueue";
+import { PlaybackControls } from "./components/PlaybackControls";
 import { RiskOverview } from "./components/RiskOverview";
 import { VesselCollisionList } from "./components/VesselCollisionList";
 import { VesselEventTimeline } from "./components/VesselEventTimeline";
@@ -36,7 +44,47 @@ import {
   formatEngineReasons,
 } from "./utils/riskExplanation";
 
-type RiskDisplayFilter = "elevated" | "all" | RiskLevel;
+type RiskDisplayFilter =
+  | "elevated"
+  | "all"
+  | RiskLevel;
+
+const PLAYBACK_EVENT_WINDOW_MS =
+  15 * 60 * 1000;
+
+/*
+ * Structural representation of the trajectory
+ * returned by the FastAPI backend.
+ *
+ * We keep the public VesselTrajectory type used
+ * throughout the application while allowing the
+ * playback layer to safely rebuild its geometry.
+ */
+interface PlaybackTrajectoryPoint {
+  timestamp: string;
+  latitude: number;
+  longitude: number;
+  [key: string]: unknown;
+}
+
+interface PlaybackTrajectoryShape {
+  mmsi: string;
+  point_count: number;
+  start_time: string | null;
+  end_time: string | null;
+
+  geometry: {
+    type: "Point" | "LineString";
+
+    coordinates:
+      | [number, number]
+      | [number, number][];
+  };
+
+  points: PlaybackTrajectoryPoint[];
+
+  [key: string]: unknown;
+}
 
 function formatMeasurement(
   value: number | null,
@@ -55,9 +103,12 @@ function formatMeasurement(
 function formatTimestamp(
   timestamp: string,
 ): string {
-  const date = new Date(timestamp);
+  const date =
+    new Date(timestamp);
 
-  return Number.isNaN(date.getTime())
+  return Number.isNaN(
+    date.getTime(),
+  )
     ? timestamp
     : date.toLocaleString();
 }
@@ -77,136 +128,315 @@ function displayVesselName(
   );
 }
 
+/*
+ * Prevent playback from showing the future
+ * portion of a selected vessel's trajectory.
+ *
+ * Normal dashboard:
+ *     full trajectory
+ *
+ * Historical playback:
+ *     only points <= playback timestamp
+ */
+function clipTrajectoryToPlaybackTime(
+  trajectory: VesselTrajectory | null,
+  playbackTimeMs: number | null,
+): VesselTrajectory | null {
+  if (
+    trajectory === null ||
+    playbackTimeMs === null
+  ) {
+    return trajectory;
+  }
+
+  const source =
+    trajectory as unknown as PlaybackTrajectoryShape;
+
+  if (
+    !Array.isArray(source.points)
+  ) {
+    /*
+     * If a future backend version removes
+     * timestamped trajectory points, hide the
+     * trajectory rather than accidentally
+     * exposing future movement.
+     */
+    return null;
+  }
+
+  const points =
+    source.points.filter(
+      (point) => {
+        const timestamp =
+          new Date(
+            point.timestamp,
+          ).getTime();
+
+        return (
+          Number.isFinite(
+            timestamp,
+          ) &&
+          timestamp <=
+            playbackTimeMs
+        );
+      },
+    );
+
+  const coordinates:
+    [number, number][] =
+    points
+      .filter(
+        (point) =>
+          Number.isFinite(
+            point.longitude,
+          ) &&
+          Number.isFinite(
+            point.latitude,
+          ),
+      )
+      .map(
+        (point) => [
+          point.longitude,
+          point.latitude,
+        ],
+      );
+
+  const geometry =
+    coordinates.length === 1
+      ? {
+          type: "Point" as const,
+          coordinates:
+            coordinates[0],
+        }
+      : {
+          type: "LineString" as const,
+          coordinates,
+        };
+
+  const clipped = {
+    ...source,
+
+    point_count:
+      points.length,
+
+    start_time:
+      points.length > 0
+        ? points[0].timestamp
+        : null,
+
+    end_time:
+      points.length > 0
+        ? points[
+            points.length - 1
+          ].timestamp
+        : null,
+
+    geometry,
+
+    points,
+  };
+
+  return clipped as unknown as VesselTrajectory;
+}
+
 function App() {
   const [
     collisionEncounters,
     setCollisionEncounters,
-  ] = useState<CollisionEncounter[]>([]);
+  ] =
+    useState<
+      CollisionEncounter[]
+    >([]);
 
   const [
     selectedCollisionId,
     setSelectedCollisionId,
-  ] = useState<number | null>(null);
+  ] =
+    useState<number | null>(
+      null,
+    );
 
   const [
     collisionError,
     setCollisionError,
-  ] = useState<string | null>(null);
+  ] =
+    useState<string | null>(
+      null,
+    );
 
   const [
     positions,
     setPositions,
-  ] = useState<RecentPosition[]>([]);
+  ] =
+    useState<
+      RecentPosition[]
+    >([]);
 
   const [
     isLoading,
     setIsLoading,
-  ] = useState(true);
+  ] =
+    useState(true);
 
   const [
     error,
     setError,
-  ] = useState<string | null>(null);
+  ] =
+    useState<string | null>(
+      null,
+    );
 
   const [
     searchQuery,
     setSearchQuery,
-  ] = useState("");
+  ] =
+    useState("");
 
   const [
     selectedMmsi,
     setSelectedMmsi,
-  ] = useState<string | null>(null);
+  ] =
+    useState<string | null>(
+      null,
+    );
 
   const [
     selectedTrajectory,
     setSelectedTrajectory,
-  ] = useState<VesselTrajectory | null>(
-    null,
-  );
+  ] =
+    useState<
+      VesselTrajectory | null
+    >(null);
 
   const [
     selectedAnomalies,
     setSelectedAnomalies,
-  ] = useState<Anomaly[]>([]);
+  ] =
+    useState<Anomaly[]>(
+      [],
+    );
 
   const [
     selectedRisks,
     setSelectedRisks,
-  ] = useState<RiskAssessment[]>([]);
+  ] =
+    useState<
+      RiskAssessment[]
+    >([]);
 
   const [
     selectedVesselCollisions,
     setSelectedVesselCollisions,
-  ] = useState<CollisionEncounter[]>([]);
+  ] =
+    useState<
+      CollisionEncounter[]
+    >([]);
 
   const [
     selectionLoading,
     setSelectionLoading,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     selectionError,
     setSelectionError,
-  ] = useState<string | null>(null);
+  ] =
+    useState<string | null>(
+      null,
+    );
 
   const [
     severityFilter,
     setSeverityFilter,
-  ] = useState("all");
+  ] =
+    useState("all");
 
   const [
     anomalyTypeFilter,
     setAnomalyTypeFilter,
-  ] = useState("all");
+  ] =
+    useState("all");
 
   const [
     selectedAnomalyId,
     setSelectedAnomalyId,
-  ] = useState<number | null>(null);
+  ] =
+    useState<number | null>(
+      null,
+    );
 
   const [
     riskLevelFilter,
     setRiskLevelFilter,
-  ] = useState<RiskDisplayFilter>(
-    "elevated",
-  );
+  ] =
+    useState<RiskDisplayFilter>(
+      "elevated",
+    );
 
   const [
     selectedRiskId,
     setSelectedRiskId,
-  ] = useState<number | null>(null);
+  ] =
+    useState<number | null>(
+      null,
+    );
+
+  const [
+    playbackTime,
+    setPlaybackTime,
+  ] =
+    useState<string | null>(
+      null,
+    );
 
   const pendingRiskIdRef =
-    useRef<number | null>(null);
+    useRef<number | null>(
+      null,
+    );
 
   const loadPositions =
-    useCallback(async () => {
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        const response =
-          await fetchRecentPositions(500);
-
-        setPositions(
-          response.items,
-        );
-      } catch (caughtError) {
-        console.error(
-          "Failed to load positions:",
-          caughtError,
+    useCallback(
+      async () => {
+        setIsLoading(
+          true,
         );
 
         setError(
-          caughtError instanceof Error
-            ? caughtError.message
-            : "An unknown API error occurred.",
+          null,
         );
-      } finally {
-        setIsLoading(false);
-      }
-    }, []);
+
+        try {
+          const response =
+            await fetchRecentPositions(
+              500,
+            );
+
+          setPositions(
+            response.items,
+          );
+        } catch (
+          caughtError
+        ) {
+          console.error(
+            "Failed to load positions:",
+            caughtError,
+          );
+
+          setError(
+            caughtError instanceof
+              Error
+              ? caughtError.message
+              : "An unknown API error occurred.",
+          );
+        } finally {
+          setIsLoading(
+            false,
+          );
+        }
+      },
+      [],
+    );
 
   const loadCollisionEncounters =
     useCallback(
@@ -214,7 +444,9 @@ function App() {
         signal?: AbortSignal,
       ) => {
         try {
-          setCollisionError(null);
+          setCollisionError(
+            null,
+          );
 
           const response =
             await fetchCollisionEncounters(
@@ -227,8 +459,12 @@ function App() {
           setCollisionEncounters(
             response.items,
           );
-        } catch (caughtError) {
-          if (signal?.aborted) {
+        } catch (
+          caughtError
+        ) {
+          if (
+            signal?.aborted
+          ) {
             return;
           }
 
@@ -238,7 +474,8 @@ function App() {
           );
 
           setCollisionError(
-            caughtError instanceof Error
+            caughtError instanceof
+              Error
               ? caughtError.message
               : "Failed to load collision encounters.",
           );
@@ -249,7 +486,9 @@ function App() {
 
   useEffect(() => {
     void loadPositions();
-  }, [loadPositions]);
+  }, [
+    loadPositions,
+  ]);
 
   useEffect(() => {
     const controller =
@@ -262,29 +501,60 @@ function App() {
     return () => {
       controller.abort();
     };
-  }, [loadCollisionEncounters]);
+  }, [
+    loadCollisionEncounters,
+  ]);
 
   useEffect(() => {
-    if (selectedMmsi === null) {
-      setSelectedTrajectory(null);
-      setSelectedAnomalies([]);
-      setSelectedRisks([]);
-      setSelectedVesselCollisions([]);
+    if (
+      selectedMmsi === null
+    ) {
+      setSelectedTrajectory(
+        null,
+      );
 
-      setSelectedAnomalyId(null);
-      setSelectedRiskId(null);
+      setSelectedAnomalies(
+        [],
+      );
+
+      setSelectedRisks(
+        [],
+      );
+
+      setSelectedVesselCollisions(
+        [],
+      );
+
+      setSelectedAnomalyId(
+        null,
+      );
+
+      setSelectedRiskId(
+        null,
+      );
 
       pendingRiskIdRef.current =
         null;
 
-      setSeverityFilter("all");
-      setAnomalyTypeFilter("all");
+      setSeverityFilter(
+        "all",
+      );
+
+      setAnomalyTypeFilter(
+        "all",
+      );
+
       setRiskLevelFilter(
         "elevated",
       );
 
-      setSelectionError(null);
-      setSelectionLoading(false);
+      setSelectionError(
+        null,
+      );
+
+      setSelectionLoading(
+        false,
+      );
 
       return;
     }
@@ -294,16 +564,37 @@ function App() {
 
     const loadSelectedVessel =
       async () => {
-        setSelectionLoading(true);
-        setSelectionError(null);
+        setSelectionLoading(
+          true,
+        );
 
-        setSelectedTrajectory(null);
-        setSelectedAnomalies([]);
-        setSelectedRisks([]);
-        setSelectedVesselCollisions([]);
+        setSelectionError(
+          null,
+        );
 
-        setSelectedAnomalyId(null);
-        setSelectedRiskId(null);
+        setSelectedTrajectory(
+          null,
+        );
+
+        setSelectedAnomalies(
+          [],
+        );
+
+        setSelectedRisks(
+          [],
+        );
+
+        setSelectedVesselCollisions(
+          [],
+        );
+
+        setSelectedAnomalyId(
+          null,
+        );
+
+        setSelectedRiskId(
+          null,
+        );
 
         try {
           const [
@@ -311,24 +602,28 @@ function App() {
             anomalyResponse,
             riskResponse,
             collisionResponse,
-          ] = await Promise.all([
-            fetchVesselTrajectory(
-              selectedMmsi,
-              controller.signal,
-            ),
-            fetchVesselAnomalies(
-              selectedMmsi,
-              controller.signal,
-            ),
-            fetchVesselRiskAssessments(
-              selectedMmsi,
-              controller.signal,
-            ),
-            fetchVesselCollisionEncounters(
-              selectedMmsi,
-              controller.signal,
-            ),
-          ]);
+          ] =
+            await Promise.all([
+              fetchVesselTrajectory(
+                selectedMmsi,
+                controller.signal,
+              ),
+
+              fetchVesselAnomalies(
+                selectedMmsi,
+                controller.signal,
+              ),
+
+              fetchVesselRiskAssessments(
+                selectedMmsi,
+                controller.signal,
+              ),
+
+              fetchVesselCollisionEncounters(
+                selectedMmsi,
+                controller.signal,
+              ),
+            ]);
 
           setSelectedTrajectory(
             trajectory,
@@ -350,9 +645,12 @@ function App() {
             pendingRiskIdRef.current;
 
           if (
-            pendingRiskId !== null &&
+            pendingRiskId !==
+              null &&
             riskResponse.items.some(
-              (assessment) =>
+              (
+                assessment,
+              ) =>
                 assessment.id ===
                 pendingRiskId,
             )
@@ -364,7 +662,9 @@ function App() {
             pendingRiskIdRef.current =
               null;
           }
-        } catch (caughtError) {
+        } catch (
+          caughtError
+        ) {
           if (
             caughtError instanceof
               DOMException &&
@@ -378,13 +678,15 @@ function App() {
             null;
 
           setSelectionError(
-            caughtError instanceof Error
+            caughtError instanceof
+              Error
               ? caughtError.message
               : "Could not load vessel data.",
           );
         } finally {
           if (
-            !controller.signal.aborted
+            !controller.signal
+              .aborted
           ) {
             setSelectionLoading(
               false,
@@ -398,7 +700,87 @@ function App() {
     return () => {
       controller.abort();
     };
-  }, [selectedMmsi]);
+  }, [
+    selectedMmsi,
+  ]);
+
+  const playbackTimeMs =
+    useMemo(() => {
+      if (
+        playbackTime === null
+      ) {
+        return null;
+      }
+
+      const value =
+        new Date(
+          playbackTime,
+        ).getTime();
+
+      return Number.isFinite(
+        value,
+      )
+        ? value
+        : null;
+    }, [
+      playbackTime,
+    ]);
+
+  const isInsidePlaybackWindow =
+    useCallback(
+      (
+        timestamp: string,
+      ) => {
+        if (
+          playbackTimeMs ===
+          null
+        ) {
+          return true;
+        }
+
+        const eventTime =
+          new Date(
+            timestamp,
+          ).getTime();
+
+        if (
+          !Number.isFinite(
+            eventTime,
+          )
+        ) {
+          return false;
+        }
+
+        return (
+          eventTime <=
+            playbackTimeMs &&
+          eventTime >=
+            playbackTimeMs -
+              PLAYBACK_EVENT_WINDOW_MS
+        );
+      },
+      [
+        playbackTimeMs,
+      ],
+    );
+
+  /*
+   * Critical 7C-B change:
+   * the selected trajectory can no
+   * longer reveal future movement.
+   */
+  const playbackTrajectory =
+    useMemo(
+      () =>
+        clipTrajectoryToPlaybackTime(
+          selectedTrajectory,
+          playbackTimeMs,
+        ),
+      [
+        selectedTrajectory,
+        playbackTimeMs,
+      ],
+    );
 
   const filteredPositions =
     useMemo(() => {
@@ -407,12 +789,16 @@ function App() {
           .trim()
           .toLowerCase();
 
-      if (!query) {
+      if (
+        !query
+      ) {
         return positions;
       }
 
       return positions.filter(
-        (position) => {
+        (
+          position,
+        ) => {
           const vesselName =
             position.vessel_name
               ?.toLowerCase() ??
@@ -437,7 +823,9 @@ function App() {
     useMemo(
       () =>
         positions.find(
-          (position) =>
+          (
+            position,
+          ) =>
             position.mmsi ===
             selectedMmsi,
         ) ?? null,
@@ -453,19 +841,33 @@ function App() {
         Array.from(
           new Set(
             selectedAnomalies.map(
-              (item) =>
+              (
+                item,
+              ) =>
                 item.anomaly_type,
             ),
           ),
         ).sort(),
-      [selectedAnomalies],
+      [
+        selectedAnomalies,
+      ],
     );
 
   const filteredAnomalies =
     useMemo(
       () =>
         selectedAnomalies.filter(
-          (anomaly) => {
+          (
+            anomaly,
+          ) => {
+            if (
+              !isInsidePlaybackWindow(
+                anomaly.observed_at,
+              )
+            ) {
+              return false;
+            }
+
             const severityMatches =
               severityFilter ===
                 "all" ||
@@ -488,6 +890,7 @@ function App() {
         selectedAnomalies,
         severityFilter,
         anomalyTypeFilter,
+        isInsidePlaybackWindow,
       ],
     );
 
@@ -495,7 +898,17 @@ function App() {
     useMemo(
       () =>
         selectedRisks.filter(
-          (assessment) => {
+          (
+            assessment,
+          ) => {
+            if (
+              !isInsidePlaybackWindow(
+                assessment.observed_at,
+              )
+            ) {
+              return false;
+            }
+
             if (
               riskLevelFilter ===
               "all"
@@ -522,19 +935,56 @@ function App() {
       [
         selectedRisks,
         riskLevelFilter,
+        isInsidePlaybackWindow,
+      ],
+    );
+
+  const playbackCollisionEncounters =
+    useMemo(
+      () =>
+        collisionEncounters.filter(
+          (
+            encounter,
+          ) =>
+            isInsidePlaybackWindow(
+              encounter.observed_at,
+            ),
+        ),
+      [
+        collisionEncounters,
+        isInsidePlaybackWindow,
+      ],
+    );
+
+  const playbackVesselCollisions =
+    useMemo(
+      () =>
+        selectedVesselCollisions.filter(
+          (
+            encounter,
+          ) =>
+            isInsidePlaybackWindow(
+              encounter.observed_at,
+            ),
+        ),
+      [
+        selectedVesselCollisions,
+        isInsidePlaybackWindow,
       ],
     );
 
   const selectedAnomaly =
     useMemo(
       () =>
-        selectedAnomalies.find(
-          (item) =>
+        filteredAnomalies.find(
+          (
+            item,
+          ) =>
             item.id ===
             selectedAnomalyId,
         ) ?? null,
       [
-        selectedAnomalies,
+        filteredAnomalies,
         selectedAnomalyId,
       ],
     );
@@ -542,13 +992,15 @@ function App() {
   const selectedRisk =
     useMemo(
       () =>
-        selectedRisks.find(
-          (item) =>
+        filteredRisks.find(
+          (
+            item,
+          ) =>
             item.id ===
             selectedRiskId,
         ) ?? null,
       [
-        selectedRisks,
+        filteredRisks,
         selectedRiskId,
       ],
     );
@@ -556,13 +1008,15 @@ function App() {
   const selectedCollision =
     useMemo(
       () =>
-        collisionEncounters.find(
-          (encounter) =>
+        playbackCollisionEncounters.find(
+          (
+            encounter,
+          ) =>
             encounter.id ===
             selectedCollisionId,
         ) ?? null,
       [
-        collisionEncounters,
+        playbackCollisionEncounters,
         selectedCollisionId,
       ],
     );
@@ -570,39 +1024,55 @@ function App() {
   const selectedRiskReasons =
     useMemo(
       () =>
-        selectedRisk === null
+        selectedRisk ===
+        null
           ? []
           : formatEngineReasons(
-              selectedRisk.risk_reasons,
+              selectedRisk
+                .risk_reasons,
             ),
-      [selectedRisk],
+      [
+        selectedRisk,
+      ],
     );
 
   const movingVesselCount =
     useMemo(
       () =>
         positions.filter(
-          (position) =>
-            position.sog !== null &&
-            position.sog >= 0.5,
+          (
+            position,
+          ) =>
+            position.sog !==
+              null &&
+            position.sog >=
+              0.5,
         ).length,
-      [positions],
+      [
+        positions,
+      ],
     );
 
   const elevatedRiskCount =
     useMemo(
       () =>
-        selectedRisks.filter(
-          (assessment) =>
+        filteredRisks.filter(
+          (
+            assessment,
+          ) =>
             assessment.risk_level !==
             "low",
         ).length,
-      [selectedRisks],
+      [
+        filteredRisks,
+      ],
     );
 
   const handleSelectVessel =
     useCallback(
-      (mmsi: string) => {
+      (
+        mmsi: string,
+      ) => {
         pendingRiskIdRef.current =
           null;
 
@@ -619,7 +1089,9 @@ function App() {
 
   const handleSelectAnomaly =
     useCallback(
-      (anomalyId: number) => {
+      (
+        anomalyId: number,
+      ) => {
         pendingRiskIdRef.current =
           null;
 
@@ -640,7 +1112,9 @@ function App() {
 
   const handleSelectRisk =
     useCallback(
-      (riskId: number) => {
+      (
+        riskId: number,
+      ) => {
         pendingRiskIdRef.current =
           null;
 
@@ -665,13 +1139,17 @@ function App() {
         collisionId: number,
       ) => {
         const encounter =
-          collisionEncounters.find(
-            (item) =>
+          playbackCollisionEncounters.find(
+            (
+              item,
+            ) =>
               item.id ===
               collisionId,
           );
 
-        if (!encounter) {
+        if (
+          !encounter
+        ) {
           return;
         }
 
@@ -694,7 +1172,9 @@ function App() {
           collisionId,
         );
       },
-      [collisionEncounters],
+      [
+        playbackCollisionEncounters,
+      ],
     );
 
   const handleSelectGlobalRisk =
@@ -736,17 +1216,125 @@ function App() {
           assessment.mmsi,
         );
       },
-      [selectedMmsi],
+      [
+        selectedMmsi,
+      ],
     );
 
   const handleRefresh =
-    useCallback(() => {
-      void loadPositions();
-      void loadCollisionEncounters();
-    }, [
-      loadPositions,
-      loadCollisionEncounters,
-    ]);
+    useCallback(
+      () => {
+        setPlaybackTime(
+          null,
+        );
+
+        setSelectedAnomalyId(
+          null,
+        );
+
+        setSelectedRiskId(
+          null,
+        );
+
+        setSelectedCollisionId(
+          null,
+        );
+
+        void loadPositions();
+
+        void loadCollisionEncounters();
+      },
+      [
+        loadPositions,
+        loadCollisionEncounters,
+      ],
+    );
+
+  const handlePlaybackFrame =
+    useCallback(
+      (
+        framePositions:
+          RecentPosition[],
+        requestedAt:
+          string,
+      ) => {
+        setPlaybackTime(
+          requestedAt,
+        );
+
+        pendingRiskIdRef.current =
+          null;
+
+        setSelectedMmsi(
+          (
+            currentMmsi,
+          ) => {
+            if (
+              currentMmsi ===
+              null
+            ) {
+              return null;
+            }
+
+            const stillVisible =
+              framePositions.some(
+                (
+                  position,
+                ) =>
+                  position.mmsi ===
+                  currentMmsi,
+              );
+
+            return stillVisible
+              ? currentMmsi
+              : null;
+          },
+        );
+
+        setSelectedAnomalyId(
+          null,
+        );
+
+        setSelectedRiskId(
+          null,
+        );
+
+        setSelectedCollisionId(
+          null,
+        );
+
+        setPositions(
+          framePositions,
+        );
+      },
+      [],
+    );
+
+  const handleExitPlayback =
+    useCallback(
+      () => {
+        setPlaybackTime(
+          null,
+        );
+
+        setSelectedAnomalyId(
+          null,
+        );
+
+        setSelectedRiskId(
+          null,
+        );
+
+        setSelectedCollisionId(
+          null,
+        );
+
+        void loadPositions();
+      },
+      [
+        loadPositions,
+      ],
+    );
 
   return (
     <main className="dashboard">
@@ -756,23 +1344,28 @@ function App() {
             Maritime decision support
           </p>
 
-          <h1>SeaGuard AI</h1>
+          <h1>
+            SeaGuard AI
+          </h1>
 
           <p className="subtitle">
             Vessel monitoring,
             explainable AIS anomaly
             detection, hybrid
-            investigation priority,
-            and CPA/TCPA collision
-            analysis.
+            investigation priority, and
+            CPA/TCPA collision analysis.
           </p>
         </div>
 
         <button
           type="button"
           className="refresh-button"
-          onClick={handleRefresh}
-          disabled={isLoading}
+          onClick={
+            handleRefresh
+          }
+          disabled={
+            isLoading
+          }
         >
           {isLoading
             ? "Loading…"
@@ -810,31 +1403,58 @@ function App() {
           </span>
 
           <strong>
-            {collisionEncounters.length}
+            {
+              playbackCollisionEncounters.length
+            }
           </strong>
         </article>
 
         <article className="summary-card">
           <span>
-            API status
+            Dashboard mode
           </span>
 
           <strong>
-            {error === null
-              ? "Connected"
-              : "Unavailable"}
+            {playbackTime !==
+            null
+              ? "Historical"
+              : error === null
+                ? "Current"
+                : "Unavailable"}
           </strong>
         </article>
       </section>
 
-      <RiskOverview
-        onSelectRisk={
-          handleSelectGlobalRisk
+      <PlaybackControls
+        onFrameChange={
+          handlePlaybackFrame
+        }
+        onExitPlayback={
+          handleExitPlayback
         }
       />
 
+      {/*
+       * The current global RiskOverview
+       * queries the complete persisted
+       * risk dataset.
+       *
+       * Hide it during replay rather than
+       * expose events from the future.
+       */}
+      {playbackTime ===
+        null && (
+        <RiskOverview
+          onSelectRisk={
+            handleSelectGlobalRisk
+          }
+        />
+      )}
+
       <CollisionQueue
-        encounters={collisionEncounters}
+        encounters={
+          playbackCollisionEncounters
+        }
         selectedCollisionId={
           selectedCollisionId
         }
@@ -853,11 +1473,14 @@ function App() {
             positions.
           </strong>
 
-          <span>{error}</span>
+          <span>
+            {error}
+          </span>
         </div>
       )}
 
-      {collisionError !== null && (
+      {collisionError !==
+        null && (
         <div
           className="error-banner"
           role="alert"
@@ -877,11 +1500,15 @@ function App() {
         <aside className="vessel-sidebar">
           <div className="panel-heading">
             <div>
-              <h2>Vessels</h2>
+              <h2>
+                Vessels
+              </h2>
 
               <p>
-                Select a recent AIS
-                position.
+                {playbackTime !==
+                null
+                  ? "Select a vessel from this historical frame."
+                  : "Select a recent AIS position."}
               </p>
             </div>
           </div>
@@ -897,11 +1524,16 @@ function App() {
             <input
               id="vessel-search"
               type="search"
-              value={searchQuery}
+              value={
+                searchQuery
+              }
               placeholder="Name or MMSI"
-              onChange={(event) =>
+              onChange={(
+                event,
+              ) =>
                 setSearchQuery(
-                  event.target.value,
+                  event.target
+                    .value,
                 )
               }
             />
@@ -920,7 +1552,9 @@ function App() {
 
           <div className="vessel-list">
             {filteredPositions.map(
-              (position) => {
+              (
+                position,
+              ) => {
                 const isSelected =
                   selectedMmsi ===
                   position.mmsi;
@@ -980,7 +1614,9 @@ function App() {
         <section className="map-panel">
           <div className="map-panel-header">
             <div>
-              <h2>Vessel map</h2>
+              <h2>
+                Vessel map
+              </h2>
 
               <p>
                 Click vessels,
@@ -993,12 +1629,14 @@ function App() {
           </div>
 
           <VesselMap
-            positions={positions}
+            positions={
+              positions
+            }
             selectedMmsi={
               selectedMmsi
             }
             trajectory={
-              selectedTrajectory
+              playbackTrajectory
             }
             anomalies={
               filteredAnomalies
@@ -1007,7 +1645,7 @@ function App() {
               filteredRisks
             }
             collisionEncounters={
-              collisionEncounters
+              playbackCollisionEncounters
             }
             selectedAnomalyId={
               selectedAnomalyId
@@ -1037,20 +1675,27 @@ function App() {
           <div className="panel-heading">
             <div>
               <h2>
-                {selectedCollision !== null
+                {selectedCollision !==
+                null
                   ? "Collision investigation"
                   : "Vessel details"}
               </h2>
 
               <p>
-                {selectedCollision !== null
+                {selectedCollision !==
+                null
                   ? "CPA/TCPA encounter analysis."
-                  : "Latest imported AIS report."}
+                  : playbackTime !==
+                      null
+                    ? "Historical AIS report."
+                    : "Latest imported AIS report."}
               </p>
             </div>
 
-            {(selectedPosition !== null ||
-              selectedCollision !== null) && (
+            {(selectedPosition !==
+              null ||
+              selectedCollision !==
+                null) && (
               <button
                 type="button"
                 className="clear-selection"
@@ -1072,16 +1717,24 @@ function App() {
             )}
           </div>
 
-          {selectedCollision !== null ? (
+          {selectedCollision !==
+          null ? (
             <CollisionInvestigation
-              encounter={selectedCollision}
-              onSelectVessel={handleSelectVessel}
+              encounter={
+                selectedCollision
+              }
+              onSelectVessel={
+                handleSelectVessel
+              }
             />
-          ) : selectedPosition === null ? (
+          ) : selectedPosition ===
+            null ? (
             <div className="empty-details">
-              Select a vessel, collision
-              encounter, anomaly, or risk
-              observation to investigate.
+              Select a vessel,
+              collision encounter,
+              anomaly, or risk
+              observation to
+              investigate.
             </div>
           ) : (
             <div className="vessel-details">
@@ -1108,13 +1761,16 @@ function App() {
                 {selectionLoading ? (
                   <span>
                     Loading trajectory,
-                    collisions, anomalies,
-                    and risk…
+                    collisions,
+                    anomalies, and
+                    risk…
                   </span>
                 ) : selectionError !==
                   null ? (
                   <span className="selection-error">
-                    {selectionError}
+                    {
+                      selectionError
+                    }
                   </span>
                 ) : (
                   <>
@@ -1125,7 +1781,7 @@ function App() {
 
                       <strong>
                         {
-                          selectedAnomalies.length
+                          filteredAnomalies.length
                         }
                       </strong>
                     </div>
@@ -1149,7 +1805,7 @@ function App() {
 
                       <strong>
                         {
-                          selectedVesselCollisions.length
+                          playbackVesselCollisions.length
                         }
                       </strong>
                     </div>
@@ -1160,7 +1816,7 @@ function App() {
                       </span>
 
                       <strong>
-                        {selectedTrajectory ===
+                        {playbackTrajectory ===
                         null
                           ? "Unavailable"
                           : "Loaded"}
@@ -1171,9 +1827,11 @@ function App() {
               </div>
 
               <VesselCollisionList
-                mmsi={selectedPosition.mmsi}
+                mmsi={
+                  selectedPosition.mmsi
+                }
                 encounters={
-                  selectedVesselCollisions
+                  playbackVesselCollisions
                 }
                 loading={
                   selectionLoading
@@ -1185,10 +1843,10 @@ function App() {
 
               <VesselEventTimeline
                 anomalies={
-                  selectedAnomalies
+                  filteredAnomalies
                 }
                 risks={
-                  selectedRisks
+                  filteredRisks
                 }
                 selectedAnomalyId={
                   selectedAnomalyId
@@ -1208,8 +1866,7 @@ function App() {
                 <div className="risk-section-heading">
                   <div>
                     <h3>
-                      Hybrid
-                      investigation
+                      Hybrid investigation
                       priority
                     </h3>
 
@@ -1273,13 +1930,11 @@ function App() {
                             }}
                           >
                             <option value="elevated">
-                              Elevated
-                              only
+                              Elevated only
                             </option>
 
                             <option value="all">
-                              All
-                              priorities
+                              All priorities
                             </option>
 
                             <option value="critical">
@@ -1354,15 +2009,12 @@ function App() {
                                   {
                                     assessment.rule_flag_count
                                   }{" "}
-                                  rule
-                                  flag
+                                  rule flag
                                   {assessment.rule_flag_count ===
                                   1
                                     ? ""
                                     : "s"}
-                                  {
-                                    " · "
-                                  }
+                                  {" · "}
                                   {assessment.detector_agreement
                                     ? "detectors agree"
                                     : "single-source evidence"}
@@ -1376,9 +2028,9 @@ function App() {
                           0 && (
                           <div className="empty-risks">
                             No risk
-                            assessments
-                            match this
-                            filter.
+                            assessments match
+                            this playback
+                            frame and filter.
                           </div>
                         )}
                       </div>
@@ -1413,8 +2065,7 @@ function App() {
                             </dd>
 
                             <dt>
-                              ML
-                              percentile
+                              ML percentile
                             </dt>
 
                             <dd>
@@ -1434,8 +2085,7 @@ function App() {
                             </dd>
 
                             <dt>
-                              Rule
-                              severity
+                              Rule severity
                             </dt>
 
                             <dd>
@@ -1455,8 +2105,7 @@ function App() {
                             </dd>
 
                             <dt>
-                              Detector
-                              agreement
+                              Detector agreement
                             </dt>
 
                             <dd>
@@ -1498,10 +2147,8 @@ function App() {
 
                           <div className="risk-explanation">
                             <strong>
-                              Why
-                              SeaGuard
-                              flagged
-                              this
+                              Why SeaGuard
+                              flagged this
                             </strong>
 
                             <p>
@@ -1516,8 +2163,7 @@ function App() {
                             <details className="risk-engine-notes">
                               <summary>
                                 Detection
-                                engine
-                                notes
+                                engine notes
                               </summary>
 
                               <ul>
@@ -1542,14 +2188,13 @@ function App() {
                           <small className="risk-disclaimer">
                             Investigation
                             priority ranks
-                            observations
-                            for review. It
-                            is not the
-                            probability
-                            that a vessel
-                            is dangerous
-                            or involved
-                            in wrongdoing.
+                            observations for
+                            review. It is not
+                            the probability
+                            that a vessel is
+                            dangerous or
+                            involved in
+                            wrongdoing.
                           </small>
                         </div>
                       )}
@@ -1618,8 +2263,7 @@ function App() {
                             }}
                           >
                             <option value="all">
-                              All
-                              severities
+                              All severities
                             </option>
 
                             <option value="critical">
@@ -1668,9 +2312,7 @@ function App() {
                             }}
                           >
                             <option value="all">
-                              All
-                              anomaly
-                              types
+                              All anomaly types
                             </option>
 
                             {anomalyTypes.map(
@@ -1758,10 +2400,10 @@ function App() {
                         {filteredAnomalies.length ===
                           0 && (
                           <div className="empty-anomalies">
-                            No
-                            anomalies
-                            match these
-                            filters.
+                            No anomalies
+                            match this
+                            playback frame
+                            and filter.
                           </div>
                         )}
                       </div>
@@ -1860,9 +2502,8 @@ function App() {
                   selectedAnomalies.length ===
                     0 && (
                     <div className="empty-anomalies">
-                      No anomaly
-                      alerts were
-                      recorded for
+                      No anomaly alerts
+                      were recorded for
                       this vessel.
                     </div>
                   )}
@@ -1900,8 +2541,7 @@ function App() {
                 </dd>
 
                 <dt>
-                  Speed over
-                  ground
+                  Speed over ground
                 </dt>
 
                 <dd>
@@ -1912,8 +2552,7 @@ function App() {
                 </dd>
 
                 <dt>
-                  Course over
-                  ground
+                  Course over ground
                 </dt>
 
                 <dd>
@@ -1935,8 +2574,7 @@ function App() {
                 </dd>
 
                 <dt>
-                  Navigation
-                  status
+                  Navigation status
                 </dt>
 
                 <dd>
@@ -1945,8 +2583,7 @@ function App() {
                 </dd>
 
                 <dt>
-                  Vessel type
-                  code
+                  Vessel type code
                 </dt>
 
                 <dd>
