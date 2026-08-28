@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from seaguard.api.routes.anomalies import router as anomalies_router
 from seaguard.api.routes.collisions import router as collision_router
 from seaguard.api.routes.health import router as health_router
+from seaguard.api.routes.live import router as live_router
 from seaguard.api.routes.playback import router as playback_router
 from seaguard.api.routes.positions import router as positions_router
 from seaguard.api.routes.risk_routes import router as risk_router
@@ -50,6 +51,7 @@ app.include_router(positions_router)
 app.include_router(playback_router)
 app.include_router(anomalies_router)
 app.include_router(risk_router)
+app.include_router(live_router)
 
 app.include_router(
     collision_router,
