@@ -423,8 +423,18 @@ def import_clean_ais_csv(
     chunk_size: int = 5_000,
     insert_batch_size: int = 1_000,
     maximum_rows: int | None = None,
+    existing_job_id: int | None = None,
 ) -> ImportSummary:
-    """Import a cleaned AIS CSV into the SeaGuard database."""
+    """
+    Import a cleaned AIS CSV into the SeaGuard database.
+
+    When ``existing_job_id`` is supplied, the importer reuses
+    that persistent import job instead of creating a new one.
+
+    This allows the continuous-ingestion worker to claim a file
+    by SHA-256 before importing it while preserving the existing
+    standalone importer behaviour.
+    """
 
     source_file = source_file.resolve()
 
@@ -437,14 +447,40 @@ def import_clean_ais_csv(
     if insert_batch_size <= 0:
         raise ValueError("insert_batch_size must be positive.")
 
-    import_job = ImportJob(
-        source_file=str(source_file),
-        status="running",
-    )
+    if existing_job_id is None:
+        import_job = ImportJob(
+            source_file=str(source_file),
+            status="running",
+        )
 
-    session.add(import_job)
-    session.commit()
-    session.refresh(import_job)
+        session.add(import_job)
+
+        session.commit()
+
+        session.refresh(import_job)
+
+    else:
+        import_job = session.get(
+            ImportJob,
+            existing_job_id,
+        )
+
+        if import_job is None:
+            raise ValueError(f"Existing import job {existing_job_id} was not found.")
+
+        import_job.source_file = str(source_file)
+
+        import_job.status = "running"
+
+        import_job.rows_read = 0
+        import_job.rows_imported = 0
+        import_job.rows_rejected = 0
+        import_job.duplicates_skipped = 0
+
+        import_job.error_message = None
+        import_job.finished_at = None
+
+        session.commit()
 
     job_id = import_job.id
 
@@ -465,7 +501,10 @@ def import_clean_ais_csv(
         for source_chunk in csv_chunks:
             rows_read += len(source_chunk)
 
-            prepared, rejected_count = _prepare_import_chunk(source_chunk)
+            (
+                prepared,
+                rejected_count,
+            ) = _prepare_import_chunk(source_chunk)
 
             rows_rejected += rejected_count
 
@@ -499,17 +538,23 @@ def import_clean_ais_csv(
                     )
 
                     rows_imported += inserted_count
+
                     duplicates_skipped += len(batch) - inserted_count
 
             import_job.rows_read = rows_read
+
             import_job.rows_imported = rows_imported
+
             import_job.rows_rejected = rows_rejected
+
             import_job.duplicates_skipped = duplicates_skipped
 
             session.commit()
 
         import_job.status = "completed"
+
         import_job.finished_at = datetime.now(UTC)
+
         session.commit()
 
     except Exception as error:
@@ -522,11 +567,17 @@ def import_clean_ais_csv(
 
         if failed_job is not None:
             failed_job.status = "failed"
+
             failed_job.rows_read = rows_read
+
             failed_job.rows_imported = rows_imported
+
             failed_job.rows_rejected = rows_rejected
+
             failed_job.duplicates_skipped = duplicates_skipped
+
             failed_job.error_message = str(error)[:4000]
+
             failed_job.finished_at = datetime.now(UTC)
 
             session.commit()

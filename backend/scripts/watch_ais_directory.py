@@ -4,14 +4,20 @@ import argparse
 import time
 from pathlib import Path
 
+from seaguard.db.session import (
+    SessionFactory,
+)
 from seaguard.ingestion.directory import (
     DirectoryAISWatcher,
+)
+from seaguard.ingestion.worker import (
+    process_discovered_file,
 )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=("Watch a directory for stable incoming AIS CSV files.")
+        description=("Continuously ingest stable AIS CSV files into SeaGuard.")
     )
 
     parser.add_argument(
@@ -32,7 +38,21 @@ def parse_args() -> argparse.Namespace:
         "--stable-scans",
         type=int,
         default=2,
-        help=("Number of unchanged scans required before a file is considered ready."),
+        help=("Number of unchanged scans required before a file is processed."),
+    )
+
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=5_000,
+        help=("CSV rows read per importer chunk."),
+    )
+
+    parser.add_argument(
+        "--insert-batch-size",
+        type=int,
+        default=1_000,
+        help=("AIS rows inserted per database batch."),
     )
 
     return parser.parse_args()
@@ -44,6 +64,12 @@ def main() -> None:
     if args.poll_seconds <= 0:
         raise SystemExit("--poll-seconds must be greater than 0.")
 
+    if args.chunk_size <= 0:
+        raise SystemExit("--chunk-size must be greater than 0.")
+
+    if args.insert_batch_size <= 0:
+        raise SystemExit("--insert-batch-size must be greater than 0.")
+
     directory = Path(args.directory).expanduser().resolve()
 
     directory.mkdir(
@@ -53,10 +79,14 @@ def main() -> None:
 
     watcher = DirectoryAISWatcher(
         directory,
-        required_stable_scans=args.stable_scans,
+        required_stable_scans=(args.stable_scans),
     )
 
-    print(f"Watching AIS directory: {directory}")
+    print("SeaGuard continuous AIS ingestion")
+
+    print(f"Incoming directory: {directory}")
+
+    print(f"Poll interval: {args.poll_seconds}s")
 
     print("Press Ctrl+C to stop.")
 
@@ -64,21 +94,52 @@ def main() -> None:
         while True:
             ready_files = watcher.scan()
 
-            for item in ready_files:
+            for discovered in ready_files:
                 print()
-                print("AIS file ready")
+                print(f"Detected: {discovered.name}")
 
-                print(f"  name: {item.name}")
+                print(f"SHA-256: {discovered.sha256}")
 
-                print(f"  size: {item.size_bytes:,} bytes")
+                try:
+                    with SessionFactory() as session:
+                        outcome = process_discovered_file(
+                            session,
+                            discovered,
+                            chunk_size=(args.chunk_size),
+                            insert_batch_size=(args.insert_batch_size),
+                        )
 
-                print(f"  sha256: {item.sha256}")
+                except Exception as error:
+                    print(f"Import failed: {discovered.name}")
+
+                    print(f"Reason: {error}")
+
+                    continue
+
+                if outcome.action == "skipped":
+                    print("Already imported; skipping.")
+
+                    print(f"Import job: {outcome.job_id}")
+
+                    continue
+
+                print("Import completed.")
+
+                print(f"Import job: {outcome.job_id}")
+
+                print(f"Rows read: {outcome.rows_read:,}")
+
+                print(f"Rows imported: {outcome.rows_imported:,}")
+
+                print(f"Rows rejected: {outcome.rows_rejected:,}")
+
+                print(f"Duplicates skipped: {outcome.duplicates_skipped:,}")
 
             time.sleep(args.poll_seconds)
 
     except KeyboardInterrupt:
         print()
-        print("AIS directory watcher stopped.")
+        print("SeaGuard AIS ingestion stopped.")
 
 
 if __name__ == "__main__":
