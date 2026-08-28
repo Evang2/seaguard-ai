@@ -1,0 +1,189 @@
+.live-status-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+
+  border: 1px solid
+    rgba(148, 163, 184, 0.22);
+
+  border-radius: 12px;
+
+  background:
+    rgba(15, 23, 42, 0.72);
+}
+
+.live-state {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+
+  min-width: 0;
+}
+
+.live-state > span:last-child {
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+.live-dot {
+  width: 9px;
+  height: 9px;
+
+  flex-shrink: 0;
+
+  border-radius: 999px;
+
+  background: #22c55e;
+}
+
+.live-status-bar.live
+  .live-dot {
+  background: #22c55e;
+
+  box-shadow:
+    0 0 0 4px
+      rgba(34, 197, 94, 0.12);
+}
+
+.live-status-bar.ingesting
+  .live-dot {
+  background: #38bdf8;
+
+  box-shadow:
+    0 0 0 4px
+      rgba(56, 189, 248, 0.12);
+}
+
+.live-status-bar.offline
+  .live-dot {
+  background: #ef4444;
+
+  box-shadow:
+    0 0 0 4px
+      rgba(239, 68, 68, 0.12);
+}
+
+.live-status-bar.historical
+  .live-dot {
+  background: #f59e0b;
+
+  box-shadow:
+    0 0 0 4px
+      rgba(245, 158, 11, 0.12);
+}
+
+.live-status-bar.live
+  .live-state strong {
+  color: #4ade80;
+}
+
+.live-status-bar.ingesting
+  .live-state strong {
+  color: #38bdf8;
+}
+
+.live-status-bar.offline
+  .live-state strong {
+  color: #f87171;
+}
+
+.live-status-bar.historical
+  .live-state strong {
+  color: #fbbf24;
+}
+
+.live-metrics {
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      5,
+      minmax(0, 1fr)
+    );
+
+  gap: 0.7rem;
+}
+
+.live-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+
+  padding: 0.65rem 0.75rem;
+
+  border-radius: 8px;
+
+  background:
+    rgba(30, 41, 59, 0.56);
+}
+
+.live-metrics span {
+  color: #94a3b8;
+  font-size: 0.72rem;
+
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.live-metrics strong {
+  overflow: hidden;
+
+  color: #e2e8f0;
+  font-size: 0.84rem;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-import {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+
+  color: #94a3b8;
+
+  font-size: 0.78rem;
+}
+
+.live-import strong {
+  color: #cbd5e1;
+}
+
+.live-import span:not(:first-child) {
+  padding-left: 0.45rem;
+
+  border-left: 1px solid
+    rgba(148, 163, 184, 0.25);
+}
+
+@media (
+  max-width: 1000px
+) {
+  .live-metrics {
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
+  }
+}
+
+@media (
+  max-width: 600px
+) {
+  .live-status-bar {
+    padding: 0.8rem;
+  }
+
+  .live-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .live-state {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
