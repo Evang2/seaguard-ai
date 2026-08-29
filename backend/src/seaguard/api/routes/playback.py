@@ -25,12 +25,50 @@ DatabaseSession = Annotated[
 
 
 def _as_utc(value: datetime) -> datetime:
-    """Normalize an API timestamp to timezone-aware UTC."""
+    """Normalize API timestamps to timezone-aware UTC."""
 
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
 
     return value.astimezone(UTC)
+
+
+def _recording_day(
+    session: Session,
+) -> datetime | None:
+    """
+    Return the UTC day that contains the most AIS observations.
+
+    SeaGuard's database can contain both a dense historical recording
+    and sparse live/recent AIS observations. Playback should represent
+    the historical recording rather than stretching from the oldest
+    observation to the newest live observation.
+
+    For v1, the densest UTC day is treated as the playback recording.
+    """
+
+    day = func.date_trunc(
+        "day",
+        AISMessage.timestamp,
+    ).label("recording_day")
+
+    row = session.execute(
+        select(
+            day,
+            func.count(AISMessage.id).label("observation_count"),
+        )
+        .group_by(day)
+        .order_by(
+            func.count(AISMessage.id).desc(),
+            day.asc(),
+        )
+        .limit(1)
+    ).one_or_none()
+
+    if row is None:
+        return None
+
+    return _as_utc(row.recording_day)
 
 
 @router.get(
@@ -40,21 +78,44 @@ def _as_utc(value: datetime) -> datetime:
 def get_playback_bounds(
     session: DatabaseSession,
 ) -> PlaybackBoundsResponse:
-    """Return the imported AIS recording time range."""
+    """
+    Return the primary historical AIS recording range.
+
+    The database may also contain continuously ingested live AIS data.
+    To keep replay usable, v1 selects the UTC day with the greatest
+    number of AIS observations and reports bounds only for that day.
+    """
+
+    recording_start = _recording_day(session)
+
+    if recording_start is None:
+        return PlaybackBoundsResponse(
+            start_time=None,
+            end_time=None,
+            observation_count=0,
+            vessel_count=0,
+        )
+
+    recording_end = recording_start + timedelta(days=1)
+
+    row = session.execute(
+        select(
+            func.min(AISMessage.timestamp),
+            func.max(AISMessage.timestamp),
+            func.count(AISMessage.id),
+            func.count(func.distinct(AISMessage.vessel_id)),
+        ).where(
+            AISMessage.timestamp >= recording_start,
+            AISMessage.timestamp < recording_end,
+        )
+    ).one()
 
     (
         start_time,
         end_time,
         observation_count,
         vessel_count,
-    ) = session.execute(
-        select(
-            func.min(AISMessage.timestamp),
-            func.max(AISMessage.timestamp),
-            func.count(AISMessage.id),
-            func.count(func.distinct(AISMessage.vessel_id)),
-        )
-    ).one()
+    ) = row
 
     return PlaybackBoundsResponse(
         start_time=start_time,
@@ -82,23 +143,30 @@ def get_playback_snapshot(
             gt=0,
             le=60,
             description=(
-                "Maximum age of a vessel AIS report relative to the requested frame."
+                "Maximum age of a vessel's AIS "
+                "report relative to the requested "
+                "playback time."
             ),
         ),
     ] = 5.0,
     limit: Annotated[
         int,
-        Query(ge=1, le=1000),
+        Query(
+            ge=1,
+            le=1000,
+        ),
     ] = 500,
 ) -> PlaybackSnapshotResponse:
     """
-    Return one historical AIS state per vessel.
+    Return one historical vessel state per MMSI.
 
-    The newest observation at or before ``at`` is used,
-    provided it is no older than ``tolerance_minutes``.
+    For each vessel, select its newest AIS message
+    at or before ``at`` while rejecting observations
+    older than ``tolerance_minutes``.
     """
 
     requested_at = _as_utc(at)
+
     window_start = requested_at - timedelta(minutes=tolerance_minutes)
 
     ranked_messages = (
@@ -107,7 +175,7 @@ def get_playback_snapshot(
             AISMessage.vessel_id.label("vessel_id"),
             func.row_number()
             .over(
-                partition_by=AISMessage.vessel_id,
+                partition_by=(AISMessage.vessel_id),
                 order_by=(
                     AISMessage.timestamp.desc(),
                     AISMessage.id.desc(),
@@ -131,7 +199,7 @@ def get_playback_snapshot(
         or 0
     )
 
-    rows = session.execute(
+    statement = (
         select(
             AISMessage,
             Vessel.mmsi,
@@ -148,7 +216,9 @@ def get_playback_snapshot(
         .where(ranked_messages.c.row_number == 1)
         .order_by(Vessel.mmsi.asc())
         .limit(limit)
-    ).all()
+    )
+
+    rows = session.execute(statement).all()
 
     items = [
         PlaybackPosition(
@@ -161,15 +231,19 @@ def get_playback_snapshot(
             sog=message.sog,
             cog=message.cog,
             heading=message.heading,
-            navigation_status=message.navigation_status,
+            navigation_status=(message.navigation_status),
         )
-        for message, mmsi, vessel_name in rows
+        for (
+            message,
+            mmsi,
+            vessel_name,
+        ) in rows
     ]
 
     return PlaybackSnapshotResponse(
         requested_at=requested_at,
         window_start=window_start,
-        tolerance_minutes=tolerance_minutes,
+        tolerance_minutes=(tolerance_minutes),
         total=int(frame_count),
         items=items,
     )

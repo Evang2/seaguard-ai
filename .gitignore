@@ -22,3 +22,4 @@ data/models/*
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+data/incoming/live_test_002.csv
