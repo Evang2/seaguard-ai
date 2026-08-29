@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import (
@@ -42,6 +42,40 @@ RISK_PRIORITY = case(
 )
 
 
+def _active_risk_window(
+    session: Session,
+    *,
+    active_window_minutes: int,
+) -> tuple[datetime, datetime] | None:
+    """Return the global AIS watermark window used by Current mode."""
+
+    watermark = session.scalar(select(func.max(AISMessage.timestamp)))
+
+    if watermark is None:
+        return None
+
+    cutoff = watermark - timedelta(
+        minutes=active_window_minutes,
+    )
+
+    return cutoff, watermark
+
+
+def _empty_risk_list(
+    *,
+    limit: int,
+    offset: int,
+) -> RiskAssessmentListResponse:
+    return RiskAssessmentListResponse.model_validate(
+        {
+            "items": [],
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+
+
 def _search_risk_assessments(
     session: Session,
     *,
@@ -51,6 +85,8 @@ def _search_risk_assessments(
     detector_agreement: bool | None,
     start_time: datetime | None,
     end_time: datetime | None,
+    current_only: bool,
+    active_window_minutes: int,
     limit: int,
     offset: int,
 ) -> RiskAssessmentListResponse:
@@ -63,6 +99,27 @@ def _search_risk_assessments(
         )
 
     conditions = []
+
+    if current_only:
+        active_window = _active_risk_window(
+            session,
+            active_window_minutes=active_window_minutes,
+        )
+
+        if active_window is None:
+            return _empty_risk_list(
+                limit=limit,
+                offset=offset,
+            )
+
+        active_cutoff, watermark = active_window
+
+        conditions.extend(
+            [
+                AISMessage.timestamp >= active_cutoff,
+                AISMessage.timestamp <= watermark,
+            ]
+        )
 
     if mmsi is not None:
         conditions.append(Vessel.mmsi == mmsi)
@@ -87,6 +144,10 @@ def _search_risk_assessments(
         .join(
             Vessel,
             Vessel.id == RiskAssessment.vessel_id,
+        )
+        .join(
+            AISMessage,
+            AISMessage.id == RiskAssessment.ais_message_id,
         )
         .where(*conditions)
     )
@@ -186,6 +247,22 @@ def list_risk_assessments(
     ] = None,
     start_time: datetime | None = None,
     end_time: datetime | None = None,
+    current_only: Annotated[
+        bool,
+        Query(
+            description=("Restrict results to the global active AIS watermark window."),
+        ),
+    ] = False,
+    active_window_minutes: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=1440,
+            description=(
+                "Size of the active AIS window used when current_only is true."
+            ),
+        ),
+    ] = 15,
     limit: Annotated[
         int,
         Query(ge=1, le=500),
@@ -205,6 +282,8 @@ def list_risk_assessments(
         detector_agreement=detector_agreement,
         start_time=start_time,
         end_time=end_time,
+        current_only=current_only,
+        active_window_minutes=active_window_minutes,
         limit=limit,
         offset=offset,
     )
@@ -216,29 +295,83 @@ def list_risk_assessments(
 )
 def get_risk_summary(
     session: DatabaseSession,
+    current_only: Annotated[
+        bool,
+        Query(
+            description=(
+                "Restrict statistics to the global active AIS watermark window."
+            ),
+        ),
+    ] = False,
+    active_window_minutes: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=1440,
+            description=(
+                "Size of the active AIS window used when current_only is true."
+            ),
+        ),
+    ] = 15,
 ) -> RiskSummaryResponse:
     """Return aggregate persisted hybrid-risk statistics."""
 
-    statement = select(
-        func.count(RiskAssessment.id).label("total"),
-        func.count(RiskAssessment.id)
-        .filter(RiskAssessment.risk_level == "low")
-        .label("low"),
-        func.count(RiskAssessment.id)
-        .filter(RiskAssessment.risk_level == "medium")
-        .label("medium"),
-        func.count(RiskAssessment.id)
-        .filter(RiskAssessment.risk_level == "high")
-        .label("high"),
-        func.count(RiskAssessment.id)
-        .filter(RiskAssessment.risk_level == "critical")
-        .label("critical"),
-        func.count(RiskAssessment.id)
-        .filter(RiskAssessment.risk_level != "low")
-        .label("elevated"),
-        func.count(RiskAssessment.id)
-        .filter(RiskAssessment.detector_agreement.is_(True))
-        .label("detector_agreement"),
+    conditions = []
+
+    if current_only:
+        active_window = _active_risk_window(
+            session,
+            active_window_minutes=active_window_minutes,
+        )
+
+        if active_window is None:
+            return RiskSummaryResponse(
+                total=0,
+                low=0,
+                medium=0,
+                high=0,
+                critical=0,
+                elevated=0,
+                detector_agreement=0,
+            )
+
+        active_cutoff, watermark = active_window
+
+        conditions.extend(
+            [
+                AISMessage.timestamp >= active_cutoff,
+                AISMessage.timestamp <= watermark,
+            ]
+        )
+
+    statement = (
+        select(
+            func.count(RiskAssessment.id).label("total"),
+            func.count(RiskAssessment.id)
+            .filter(RiskAssessment.risk_level == "low")
+            .label("low"),
+            func.count(RiskAssessment.id)
+            .filter(RiskAssessment.risk_level == "medium")
+            .label("medium"),
+            func.count(RiskAssessment.id)
+            .filter(RiskAssessment.risk_level == "high")
+            .label("high"),
+            func.count(RiskAssessment.id)
+            .filter(RiskAssessment.risk_level == "critical")
+            .label("critical"),
+            func.count(RiskAssessment.id)
+            .filter(RiskAssessment.risk_level != "low")
+            .label("elevated"),
+            func.count(RiskAssessment.id)
+            .filter(RiskAssessment.detector_agreement.is_(True))
+            .label("detector_agreement"),
+        )
+        .select_from(RiskAssessment)
+        .join(
+            AISMessage,
+            AISMessage.id == RiskAssessment.ais_message_id,
+        )
+        .where(*conditions)
     )
 
     row = session.execute(statement).one()
@@ -282,6 +415,22 @@ def get_vessel_risk_assessments(
     ] = None,
     start_time: datetime | None = None,
     end_time: datetime | None = None,
+    current_only: Annotated[
+        bool,
+        Query(
+            description=("Restrict results to the global active AIS watermark window."),
+        ),
+    ] = False,
+    active_window_minutes: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=1440,
+            description=(
+                "Size of the active AIS window used when current_only is true."
+            ),
+        ),
+    ] = 15,
     limit: Annotated[
         int,
         Query(ge=1, le=500),
@@ -309,6 +458,8 @@ def get_vessel_risk_assessments(
         detector_agreement=detector_agreement,
         start_time=start_time,
         end_time=end_time,
+        current_only=current_only,
+        active_window_minutes=active_window_minutes,
         limit=limit,
         offset=offset,
     )

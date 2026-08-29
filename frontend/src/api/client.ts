@@ -21,6 +21,14 @@ export interface RecentPositionQuery {
   maximumAgeMinutes?: number;
 }
 
+export interface CurrentWindowQuery {
+  currentOnly?: boolean;
+  activeWindowMinutes?: number;
+}
+
+export type CurrentRiskQuery =
+  CurrentWindowQuery;
+
 async function requestJson<T>(
   url: string,
   signal?: AbortSignal,
@@ -114,6 +122,7 @@ export function fetchVesselTrajectory(
 export function fetchVesselAnomalies(
   mmsi: string,
   signal?: AbortSignal,
+  query: CurrentWindowQuery = {},
 ): Promise<AnomalyListResponse> {
   const url = new URL(
     `${API_BASE_URL}/api/v1/anomalies`,
@@ -121,6 +130,25 @@ export function fetchVesselAnomalies(
 
   url.searchParams.set("mmsi", mmsi);
   url.searchParams.set("limit", "500");
+
+  if (query.currentOnly !== undefined) {
+    url.searchParams.set(
+      "current_only",
+      String(query.currentOnly),
+    );
+  }
+
+  if (
+    query.activeWindowMinutes
+    !== undefined
+  ) {
+    url.searchParams.set(
+      "active_window_minutes",
+      String(
+        query.activeWindowMinutes,
+      ),
+    );
+  }
 
   return requestJson<AnomalyListResponse>(
     url.toString(),
@@ -131,6 +159,7 @@ export function fetchVesselAnomalies(
 export function fetchVesselRiskAssessments(
   mmsi: string,
   signal?: AbortSignal,
+  query: CurrentRiskQuery = {},
 ): Promise<RiskAssessmentListResponse> {
   const encodedMmsi =
     encodeURIComponent(mmsi);
@@ -141,6 +170,25 @@ export function fetchVesselRiskAssessments(
 
   url.searchParams.set("limit", "500");
 
+  if (query.currentOnly !== undefined) {
+    url.searchParams.set(
+      "current_only",
+      String(query.currentOnly),
+    );
+  }
+
+  if (
+    query.activeWindowMinutes
+    !== undefined
+  ) {
+    url.searchParams.set(
+      "active_window_minutes",
+      String(
+        query.activeWindowMinutes,
+      ),
+    );
+  }
+
   return requestJson<RiskAssessmentListResponse>(
     url.toString(),
     signal,
@@ -149,14 +197,39 @@ export function fetchVesselRiskAssessments(
 
 export function fetchRiskSummary(
   signal?: AbortSignal,
+  query: CurrentRiskQuery = {},
 ): Promise<RiskSummaryResponse> {
-  return requestJson<RiskSummaryResponse>(
+  const url = new URL(
     `${API_BASE_URL}/api/v1/risk/summary`,
+  );
+
+  if (query.currentOnly !== undefined) {
+    url.searchParams.set(
+      "current_only",
+      String(query.currentOnly),
+    );
+  }
+
+  if (
+    query.activeWindowMinutes
+    !== undefined
+  ) {
+    url.searchParams.set(
+      "active_window_minutes",
+      String(
+        query.activeWindowMinutes,
+      ),
+    );
+  }
+
+  return requestJson<RiskSummaryResponse>(
+    url.toString(),
     signal,
   );
 }
 
-export interface GlobalRiskQueueFilters {
+export interface GlobalRiskQueueFilters
+  extends CurrentRiskQuery {
   mmsi?: string;
   riskLevel?: RiskLevel;
   minimumMlPercentile?: number;
@@ -207,6 +280,30 @@ export function fetchGlobalRiskQueue(
       "detector_agreement",
       String(
         filters.detectorAgreement,
+      ),
+    );
+  }
+
+  if (
+    filters.currentOnly
+    !== undefined
+  ) {
+    url.searchParams.set(
+      "current_only",
+      String(
+        filters.currentOnly,
+      ),
+    );
+  }
+
+  if (
+    filters.activeWindowMinutes
+    !== undefined
+  ) {
+    url.searchParams.set(
+      "active_window_minutes",
+      String(
+        filters.activeWindowMinutes,
       ),
     );
   }

@@ -43,6 +43,7 @@ type MlFilter =
   | "99.5";
 
 const PAGE_SIZE = 25;
+const ACTIVE_WINDOW_MINUTES = 15;
 
 function formatTimestamp(
   timestamp: string,
@@ -154,6 +155,11 @@ export function RiskOverview({
           const response =
             await fetchRiskSummary(
               signal,
+              {
+                currentOnly: true,
+                activeWindowMinutes:
+                  ACTIVE_WINDOW_MINUTES,
+              },
             );
 
           setSummary(
@@ -217,6 +223,11 @@ export function RiskOverview({
                   PAGE_SIZE,
 
                 offset,
+
+                currentOnly: true,
+
+                activeWindowMinutes:
+                  ACTIVE_WINDOW_MINUTES,
               },
               signal,
             );
@@ -431,8 +442,9 @@ export function RiskOverview({
           </h2>
 
           <p>
-            Highest-priority persisted AIS
-            observations across all vessels.
+            Highest-priority AIS observations
+            inside the current 15-minute active
+            window.
           </p>
         </div>
 
@@ -746,7 +758,7 @@ export function RiskOverview({
           <span className="risk-total-label">
             {summary.total.toLocaleString()}
             {" "}
-            assessments overall
+            assessments in current window
           </span>
         )}
       </div>

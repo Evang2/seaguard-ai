@@ -404,6 +404,9 @@ function App() {
       null,
     );
 
+  const isPlaybackActive =
+    playbackTime !== null;
+
   const pendingRiskIdRef =
     useRef<number | null>(
       null,
@@ -802,11 +805,23 @@ function App() {
               fetchVesselAnomalies(
                 selectedMmsi,
                 controller.signal,
+                {
+                  currentOnly:
+                    !isPlaybackActive,
+                  activeWindowMinutes:
+                    LIVE_ACTIVE_WINDOW_MINUTES,
+                },
               ),
 
               fetchVesselRiskAssessments(
                 selectedMmsi,
                 controller.signal,
+                {
+                  currentOnly:
+                    !isPlaybackActive,
+                  activeWindowMinutes:
+                    LIVE_ACTIVE_WINDOW_MINUTES,
+                },
               ),
 
               fetchVesselCollisionEncounters(
@@ -892,6 +907,7 @@ function App() {
     };
   }, [
     selectedMmsi,
+    isPlaybackActive,
   ]);
 
   /*
@@ -906,7 +922,7 @@ function App() {
   useEffect(() => {
     if (
       selectedMmsi === null ||
-      playbackTime !== null
+      isPlaybackActive
     ) {
       return;
     }
@@ -944,11 +960,21 @@ function App() {
               fetchVesselAnomalies(
                 selectedMmsi,
                 controller.signal,
+                {
+                  currentOnly: true,
+                  activeWindowMinutes:
+                    LIVE_ACTIVE_WINDOW_MINUTES,
+                },
               ),
 
               fetchVesselRiskAssessments(
                 selectedMmsi,
                 controller.signal,
+                {
+                  currentOnly: true,
+                  activeWindowMinutes:
+                    LIVE_ACTIVE_WINDOW_MINUTES,
+                },
               ),
 
               fetchVesselCollisionEncounters(
@@ -1029,7 +1055,7 @@ function App() {
     };
   }, [
     selectedMmsi,
-    playbackTime,
+    isPlaybackActive,
   ]);
 
   const playbackTimeMs =
