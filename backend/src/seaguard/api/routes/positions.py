@@ -22,6 +22,8 @@ DatabaseSession = Annotated[
     Depends(get_session),
 ]
 
+DEFAULT_ACTIVE_WINDOW_MINUTES = 15
+
 
 @router.get(
     "/recent",
@@ -31,23 +33,58 @@ def get_recent_positions(
     session: DatabaseSession,
     limit: Annotated[
         int,
-        Query(ge=1, le=1_000),
+        Query(
+            ge=1,
+            le=1_000,
+        ),
     ] = 500,
     maximum_age_minutes: Annotated[
         int | None,
         Query(
             ge=1,
             le=525_600,
-            description=("Optionally exclude positions older than this many minutes."),
+            description=(
+                "Optionally exclude positions older than this many "
+                "minutes relative to the server clock."
+            ),
         ),
     ] = None,
+    active_only: Annotated[
+        bool,
+        Query(
+            description=(
+                "Return only vessels whose latest AIS report is inside "
+                "the active window relative to the newest AIS timestamp "
+                "stored in the database."
+            ),
+        ),
+    ] = False,
+    active_window_minutes: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=1_440,
+            description=(
+                "Freshness window used when active_only=true. "
+                "The window is measured backwards from the newest "
+                "AIS timestamp in the database."
+            ),
+        ),
+    ] = DEFAULT_ACTIVE_WINDOW_MINUTES,
 ) -> RecentPositionsResponse:
-    """Return the latest available position per vessel."""
+    """
+    Return the latest available position per vessel.
+
+    ``active_only`` is intentionally based on the database AIS watermark
+    rather than ``datetime.now()``. This keeps the live/current view useful
+    for recorded or simulated feeds whose timestamps may differ from the
+    machine clock.
+    """
 
     position_rank = (
         func.row_number()
         .over(
-            partition_by=AISMessage.vessel_id,
+            partition_by=(AISMessage.vessel_id),
             order_by=(
                 AISMessage.timestamp.desc(),
                 AISMessage.id.desc(),
@@ -75,14 +112,30 @@ def get_recent_positions(
             Vessel.id == AISMessage.vessel_id,
         )
         .where(ranked_positions.c.position_rank == 1)
-        .order_by(AISMessage.timestamp.desc())
-        .limit(limit)
     )
+
+    if active_only:
+        watermark = session.scalar(select(func.max(AISMessage.timestamp)))
+
+        if watermark is None:
+            return RecentPositionsResponse(
+                items=[],
+                total=0,
+            )
+
+        active_cutoff = watermark - timedelta(minutes=active_window_minutes)
+
+        statement = statement.where(AISMessage.timestamp >= active_cutoff)
 
     if maximum_age_minutes is not None:
         cutoff = datetime.now(UTC) - timedelta(minutes=maximum_age_minutes)
 
         statement = statement.where(AISMessage.timestamp >= cutoff)
+
+    statement = statement.order_by(
+        AISMessage.timestamp.desc(),
+        AISMessage.id.desc(),
+    ).limit(limit)
 
     rows = session.execute(statement).all()
 

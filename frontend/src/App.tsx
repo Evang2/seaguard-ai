@@ -55,6 +55,9 @@ const PLAYBACK_EVENT_WINDOW_MS =
 
 const LIVE_POSITION_POLL_MS =
   5_000;
+
+const LIVE_ACTIVE_WINDOW_MINUTES =
+  15;
 /*
  * Structural representation of the trajectory
  * returned by the FastAPI backend.
@@ -252,6 +255,14 @@ function App() {
     >([]);
 
   const [
+    currentCollisionEncounters,
+    setCurrentCollisionEncounters,
+  ] =
+    useState<
+      CollisionEncounter[]
+    >([]);
+
+  const [
     selectedCollisionId,
     setSelectedCollisionId,
   ] =
@@ -413,6 +424,12 @@ function App() {
           const response =
             await fetchRecentPositions(
               500,
+              undefined,
+              {
+                activeOnly: true,
+                activeWindowMinutes:
+                  LIVE_ACTIVE_WINDOW_MINUTES,
+              },
             );
 
           setPositions(
@@ -487,6 +504,53 @@ function App() {
       [],
     );
 
+  const loadCurrentCollisionEncounters =
+    useCallback(
+      async (
+        signal?: AbortSignal,
+      ) => {
+        try {
+          const response =
+            await fetchCollisionEncounters(
+              {
+                limit: 500,
+                currentOnly: true,
+              },
+              signal,
+            );
+
+          setCurrentCollisionEncounters(
+            response.items,
+          );
+
+          setCollisionError(
+            null,
+          );
+        } catch (
+          caughtError
+        ) {
+          if (
+            signal?.aborted
+          ) {
+            return;
+          }
+
+          console.error(
+            "Failed to load current collision encounters:",
+            caughtError,
+          );
+
+          setCollisionError(
+            caughtError instanceof
+              Error
+              ? caughtError.message
+              : "Failed to load current collision encounters.",
+          );
+        }
+      },
+      [],
+    );
+
   useEffect(() => {
     void loadPositions();
   }, [
@@ -497,15 +561,21 @@ function App() {
     const controller =
       new AbortController();
 
-    void loadCollisionEncounters(
-      controller.signal,
-    );
+    void Promise.all([
+      loadCollisionEncounters(
+        controller.signal,
+      ),
+      loadCurrentCollisionEncounters(
+        controller.signal,
+      ),
+    ]);
 
     return () => {
       controller.abort();
     };
   }, [
     loadCollisionEncounters,
+    loadCurrentCollisionEncounters,
   ]);
 
   /*
@@ -547,10 +617,16 @@ function App() {
           const positionPromise =
             fetchRecentPositions(
               500,
+              undefined,
+              {
+                activeOnly: true,
+                activeWindowMinutes:
+                  LIVE_ACTIVE_WINDOW_MINUTES,
+              },
             );
 
           const collisionPromise =
-            loadCollisionEncounters(
+            loadCurrentCollisionEncounters(
               collisionController
                 .signal,
             );
@@ -616,7 +692,7 @@ function App() {
     };
   }, [
     playbackTime,
-    loadCollisionEncounters,
+    loadCurrentCollisionEncounters,
   ]);
 
   useEffect(() => {
@@ -1193,34 +1269,71 @@ function App() {
 
   const playbackCollisionEncounters =
     useMemo(
-      () =>
-        collisionEncounters.filter(
+      () => {
+        const source =
+          playbackTimeMs ===
+          null
+            ? currentCollisionEncounters
+            : collisionEncounters;
+
+        return source.filter(
           (
             encounter,
           ) =>
             isInsidePlaybackWindow(
               encounter.observed_at,
             ),
-        ),
+        );
+      },
       [
         collisionEncounters,
+        currentCollisionEncounters,
+        playbackTimeMs,
         isInsidePlaybackWindow,
       ],
     );
 
   const playbackVesselCollisions =
     useMemo(
-      () =>
-        selectedVesselCollisions.filter(
+      () => {
+        if (
+          playbackTimeMs ===
+          null
+        ) {
+          if (
+            selectedMmsi ===
+            null
+          ) {
+            return [];
+          }
+
+          return currentCollisionEncounters.filter(
+            (
+              encounter,
+            ) =>
+              encounter.vessel_a
+                .mmsi ===
+                selectedMmsi ||
+              encounter.vessel_b
+                .mmsi ===
+                selectedMmsi,
+          );
+        }
+
+        return selectedVesselCollisions.filter(
           (
             encounter,
           ) =>
             isInsidePlaybackWindow(
               encounter.observed_at,
             ),
-        ),
+        );
+      },
       [
         selectedVesselCollisions,
+        currentCollisionEncounters,
+        selectedMmsi,
+        playbackTimeMs,
         isInsidePlaybackWindow,
       ],
     );
@@ -1495,10 +1608,13 @@ function App() {
         void loadPositions();
 
         void loadCollisionEncounters();
+
+        void loadCurrentCollisionEncounters();
       },
       [
         loadPositions,
         loadCollisionEncounters,
+        loadCurrentCollisionEncounters,
       ],
     );
 

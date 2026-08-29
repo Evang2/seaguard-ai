@@ -10,6 +10,9 @@ from seaguard.db.session import (
 from seaguard.ingestion.directory import (
     DirectoryAISWatcher,
 )
+from seaguard.ingestion.pipeline import (
+    run_live_analytics,
+)
 from seaguard.ingestion.worker import (
     process_discovered_file,
 )
@@ -107,6 +110,7 @@ def main() -> None:
                             discovered,
                             chunk_size=(args.chunk_size),
                             insert_batch_size=(args.insert_batch_size),
+                            analytics_runner=run_live_analytics,
                         )
 
                 except Exception as error:

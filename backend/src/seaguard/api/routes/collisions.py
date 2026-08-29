@@ -12,6 +12,9 @@ from seaguard.api.schemas.collision import (
     CollisionSummaryResponse,
     CollisionVesselState,
 )
+from seaguard.collision.current import (
+    current_collision_conditions,
+)
 from seaguard.db.collision_models import CollisionEncounterRecord
 from seaguard.db.models import AISMessage, Vessel
 from seaguard.db.session import get_session
@@ -192,13 +195,31 @@ def _row_to_response(
 )
 def get_collision_summary(
     session: SessionDependency,
+    current_only: Annotated[
+        bool,
+        Query(
+            description=(
+                "Summarize only encounters whose source AIS "
+                "messages are still the latest vessel states."
+            )
+        ),
+    ] = False,
 ) -> CollisionSummaryResponse:
-    rows = session.execute(
+    filters = []
+
+    if current_only:
+        filters.extend(current_collision_conditions())
+
+    statement = (
         select(
             CollisionEncounterRecord.risk_level,
             func.count(CollisionEncounterRecord.id),
-        ).group_by(CollisionEncounterRecord.risk_level)
-    ).all()
+        )
+        .where(*filters)
+        .group_by(CollisionEncounterRecord.risk_level)
+    )
+
+    rows = session.execute(statement).all()
 
     counts = {
         "low": 0,
@@ -251,6 +272,15 @@ def list_collision_encounters(
             ge=0,
         ),
     ] = 0,
+    current_only: Annotated[
+        bool,
+        Query(
+            description=(
+                "Return only encounters whose source AIS "
+                "messages are still the latest vessel states."
+            )
+        ),
+    ] = False,
 ) -> CollisionEncounterListResponse:
     statement, _, _ = _build_collision_query()
 
@@ -266,6 +296,9 @@ def list_collision_encounters(
 
     if maximum_tcpa_minutes is not None:
         filters.append(CollisionEncounterRecord.tcpa_minutes <= maximum_tcpa_minutes)
+
+    if current_only:
+        filters.extend(current_collision_conditions())
 
     if filters:
         statement = statement.where(*filters)
@@ -317,6 +350,12 @@ def list_vessel_collision_encounters(
             ge=0,
         ),
     ] = 0,
+    current_only: Annotated[
+        bool,
+        Query(
+            description=("Return only current collision encounters for this vessel.")
+        ),
+    ] = False,
 ) -> CollisionEncounterListResponse:
     (
         statement,
@@ -324,13 +363,18 @@ def list_vessel_collision_encounters(
         vessel_b,
     ) = _build_collision_query()
 
-    vessel_filter = or_(
-        vessel_a.mmsi == mmsi,
-        vessel_b.mmsi == mmsi,
-    )
+    filters = [
+        or_(
+            vessel_a.mmsi == mmsi,
+            vessel_b.mmsi == mmsi,
+        )
+    ]
+
+    if current_only:
+        filters.extend(current_collision_conditions())
 
     statement = (
-        statement.where(vessel_filter)
+        statement.where(*filters)
         .order_by(
             RISK_PRIORITY,
             CollisionEncounterRecord.tcpa_minutes.asc().nulls_last(),
@@ -345,6 +389,16 @@ def list_vessel_collision_encounters(
 
     count_vessel_b = aliased(Vessel)
 
+    count_filters = [
+        or_(
+            count_vessel_a.mmsi == mmsi,
+            count_vessel_b.mmsi == mmsi,
+        )
+    ]
+
+    if current_only:
+        count_filters.extend(current_collision_conditions())
+
     count_statement = (
         select(func.count(CollisionEncounterRecord.id))
         .join(
@@ -355,12 +409,7 @@ def list_vessel_collision_encounters(
             count_vessel_b,
             count_vessel_b.id == CollisionEncounterRecord.vessel_b_id,
         )
-        .where(
-            or_(
-                count_vessel_a.mmsi == mmsi,
-                count_vessel_b.mmsi == mmsi,
-            )
-        )
+        .where(*count_filters)
     )
 
     total = session.scalar(count_statement)

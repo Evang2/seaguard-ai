@@ -15,6 +15,11 @@ const API_BASE_URL = (
   ?? DEFAULT_API_BASE_URL
 ).replace(/\/$/, "");
 
+export interface RecentPositionQuery {
+  activeOnly?: boolean;
+  activeWindowMinutes?: number;
+  maximumAgeMinutes?: number;
+}
 
 async function requestJson<T>(
   url: string,
@@ -41,10 +46,10 @@ async function requestJson<T>(
   return response.json() as Promise<T>;
 }
 
-
 export function fetchRecentPositions(
   limit = 500,
   signal?: AbortSignal,
+  query: RecentPositionQuery = {},
 ): Promise<RecentPositionsResponse> {
   const url = new URL(
     `${API_BASE_URL}/api/v1/positions/recent`,
@@ -55,14 +60,42 @@ export function fetchRecentPositions(
     String(limit),
   );
 
-  return requestJson<
-    RecentPositionsResponse
-  >(
+  if (query.activeOnly !== undefined) {
+    url.searchParams.set(
+      "active_only",
+      String(query.activeOnly),
+    );
+  }
+
+  if (
+    query.activeWindowMinutes
+    !== undefined
+  ) {
+    url.searchParams.set(
+      "active_window_minutes",
+      String(
+        query.activeWindowMinutes,
+      ),
+    );
+  }
+
+  if (
+    query.maximumAgeMinutes
+    !== undefined
+  ) {
+    url.searchParams.set(
+      "maximum_age_minutes",
+      String(
+        query.maximumAgeMinutes,
+      ),
+    );
+  }
+
+  return requestJson<RecentPositionsResponse>(
     url.toString(),
     signal,
   );
 }
-
 
 export function fetchVesselTrajectory(
   mmsi: string,
@@ -77,7 +110,6 @@ export function fetchVesselTrajectory(
     signal,
   );
 }
-
 
 export function fetchVesselAnomalies(
   mmsi: string,
@@ -95,7 +127,6 @@ export function fetchVesselAnomalies(
     signal,
   );
 }
-
 
 export function fetchVesselRiskAssessments(
   mmsi: string,
@@ -124,7 +155,6 @@ export function fetchRiskSummary(
     signal,
   );
 }
-
 
 export interface GlobalRiskQueueFilters {
   mmsi?: string;

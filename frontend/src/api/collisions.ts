@@ -5,114 +5,23 @@ import type {
 } from "./types";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ??
   "http://127.0.0.1:8000";
 
-export interface CollisionQueueFilters {
-  riskLevel?: CollisionRiskLevel;
 
+export interface CollisionEncounterQuery {
+  riskLevel?: CollisionRiskLevel;
   minimumTcpaMinutes?: number;
   maximumTcpaMinutes?: number;
-
   limit?: number;
   offset?: number;
+  currentOnly?: boolean;
 }
 
-async function parseResponse<T>(
-  response: Response,
+
+async function requestJson<T>(
+  url: string,
+  signal?: AbortSignal,
 ): Promise<T> {
-  if (!response.ok) {
-    let detail = "";
-
-    try {
-      const payload = await response.json();
-
-      if (
-        typeof payload === "object" &&
-        payload !== null &&
-        "detail" in payload
-      ) {
-        detail = String(payload.detail);
-      }
-    } catch {
-      // Ignore JSON parsing errors and use HTTP status below.
-    }
-
-    throw new Error(
-      detail ||
-        `SeaGuard API request failed with HTTP ${response.status}.`,
-    );
-  }
-
-  return (await response.json()) as T;
-}
-
-export async function fetchCollisionSummary(
-  signal?: AbortSignal,
-): Promise<CollisionSummaryResponse> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/collisions/summary`,
-    {
-      signal,
-    },
-  );
-
-  return parseResponse<CollisionSummaryResponse>(
-    response,
-  );
-}
-
-export async function fetchCollisionEncounters(
-  filters: CollisionQueueFilters = {},
-  signal?: AbortSignal,
-): Promise<CollisionEncounterListResponse> {
-  const params = new URLSearchParams();
-
-  if (filters.riskLevel !== undefined) {
-    params.set(
-      "risk_level",
-      filters.riskLevel,
-    );
-  }
-
-  if (
-    filters.minimumTcpaMinutes !== undefined
-  ) {
-    params.set(
-      "minimum_tcpa_minutes",
-      String(filters.minimumTcpaMinutes),
-    );
-  }
-
-  if (
-    filters.maximumTcpaMinutes !== undefined
-  ) {
-    params.set(
-      "maximum_tcpa_minutes",
-      String(filters.maximumTcpaMinutes),
-    );
-  }
-
-  if (filters.limit !== undefined) {
-    params.set(
-      "limit",
-      String(filters.limit),
-    );
-  }
-
-  if (filters.offset !== undefined) {
-    params.set(
-      "offset",
-      String(filters.offset),
-    );
-  }
-
-  const query = params.toString();
-
-  const url = query
-    ? `${API_BASE_URL}/api/v1/collisions?${query}`
-    : `${API_BASE_URL}/api/v1/collisions`;
-
   const response = await fetch(
     url,
     {
@@ -120,29 +29,248 @@ export async function fetchCollisionEncounters(
     },
   );
 
-  return parseResponse<CollisionEncounterListResponse>(
-    response,
+  if (!response.ok) {
+    let detail =
+      `${response.status} ${response.statusText}`;
+
+    try {
+      const body =
+        (await response.json()) as {
+          detail?: unknown;
+        };
+
+      if (
+        typeof body.detail ===
+        "string"
+      ) {
+        detail = body.detail;
+      }
+    } catch {
+      // Keep the HTTP status text when
+      // the response body is not JSON.
+    }
+
+    throw new Error(
+      `Collision API request failed: ${detail}`,
+    );
+  }
+
+  return (await response.json()) as T;
+}
+
+
+function buildCollisionSearchParams(
+  query: CollisionEncounterQuery,
+): URLSearchParams {
+  const params =
+    new URLSearchParams();
+
+  if (
+    query.riskLevel !==
+    undefined
+  ) {
+    params.set(
+      "risk_level",
+      query.riskLevel,
+    );
+  }
+
+  if (
+    query.minimumTcpaMinutes !==
+    undefined
+  ) {
+    params.set(
+      "minimum_tcpa_minutes",
+      String(
+        query.minimumTcpaMinutes,
+      ),
+    );
+  }
+
+  if (
+    query.maximumTcpaMinutes !==
+    undefined
+  ) {
+    params.set(
+      "maximum_tcpa_minutes",
+      String(
+        query.maximumTcpaMinutes,
+      ),
+    );
+  }
+
+  if (
+    query.limit !==
+    undefined
+  ) {
+    params.set(
+      "limit",
+      String(
+        query.limit,
+      ),
+    );
+  }
+
+  if (
+    query.offset !==
+    undefined
+  ) {
+    params.set(
+      "offset",
+      String(
+        query.offset,
+      ),
+    );
+  }
+
+  if (
+    query.currentOnly !==
+    undefined
+  ) {
+    params.set(
+      "current_only",
+      String(
+        query.currentOnly,
+      ),
+    );
+  }
+
+  return params;
+}
+
+
+export async function fetchCollisionEncounters(
+  query: CollisionEncounterQuery = {},
+  signal?: AbortSignal,
+): Promise<CollisionEncounterListResponse> {
+  const params =
+    buildCollisionSearchParams(
+      query,
+    );
+
+  const queryString =
+    params.toString();
+
+  const url =
+    `${API_BASE_URL}/api/v1/collisions${
+      queryString
+        ? `?${queryString}`
+        : ""
+    }`;
+
+  return requestJson<
+    CollisionEncounterListResponse
+  >(
+    url,
+    signal,
   );
 }
+
 
 export async function fetchVesselCollisionEncounters(
   mmsi: string,
   signal?: AbortSignal,
+  options: {
+    currentOnly?: boolean;
+    limit?: number;
+    offset?: number;
+  } = {},
 ): Promise<CollisionEncounterListResponse> {
-  const params = new URLSearchParams({
-    limit: "500",
-  });
+  const params =
+    new URLSearchParams();
 
-  const response = await fetch(
+  if (
+    options.currentOnly !==
+    undefined
+  ) {
+    params.set(
+      "current_only",
+      String(
+        options.currentOnly,
+      ),
+    );
+  }
+
+  if (
+    options.limit !==
+    undefined
+  ) {
+    params.set(
+      "limit",
+      String(
+        options.limit,
+      ),
+    );
+  }
+
+  if (
+    options.offset !==
+    undefined
+  ) {
+    params.set(
+      "offset",
+      String(
+        options.offset,
+      ),
+    );
+  }
+
+  const queryString =
+    params.toString();
+
+  const url =
     `${API_BASE_URL}/api/v1/collisions/${encodeURIComponent(
       mmsi,
-    )}?${params.toString()}`,
-    {
-      signal,
-    },
-  );
+    )}${
+      queryString
+        ? `?${queryString}`
+        : ""
+    }`;
 
-  return parseResponse<CollisionEncounterListResponse>(
-    response,
+  return requestJson<
+    CollisionEncounterListResponse
+  >(
+    url,
+    signal,
+  );
+}
+
+
+export async function fetchCollisionSummary(
+  options: {
+    currentOnly?: boolean;
+  } = {},
+  signal?: AbortSignal,
+): Promise<CollisionSummaryResponse> {
+  const params =
+    new URLSearchParams();
+
+  if (
+    options.currentOnly !==
+    undefined
+  ) {
+    params.set(
+      "current_only",
+      String(
+        options.currentOnly,
+      ),
+    );
+  }
+
+  const queryString =
+    params.toString();
+
+  const url =
+    `${API_BASE_URL}/api/v1/collisions/summary${
+      queryString
+        ? `?${queryString}`
+        : ""
+    }`;
+
+  return requestJson<
+    CollisionSummaryResponse
+  >(
+    url,
+    signal,
   );
 }
