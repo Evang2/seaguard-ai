@@ -1027,6 +1027,179 @@ npm run dev -- --force
 
 ---
 
+# Testing Strategy
+
+Testing is a first-class part of SeaGuard's development workflow rather than a final cleanup step.
+
+The backend test suite is built with **pytest** and is used to verify both isolated analytical logic and end-to-end operational behaviour.
+
+Current test coverage includes areas such as:
+
+- AIS cleaning and normalization;
+- trajectory feature engineering;
+- deterministic anomaly detection;
+- database persistence;
+- ingestion orchestration;
+- post-import anomaly processing;
+- post-import ML and hybrid-risk processing;
+- post-import collision analysis;
+- Current-vs-Historical collision semantics;
+- live anomaly processing;
+- live hybrid-risk processing;
+- API behaviour;
+- regression checks for operational state.
+
+Several tests were added specifically while building the live intelligence pipeline, including coverage around:
+
+```text
+ingestion analytics
+live anomalies
+live hybrid risk
+live collisions
+current collision semantics
+```
+
+The purpose is not only to test individual functions, but also to protect the behaviour of the complete pipeline:
+
+```text
+AIS input
+   ↓
+ingestion
+   ↓
+feature engineering
+   ↓
+rules / ML / hybrid risk / collisions
+   ↓
+database persistence
+   ↓
+API responses
+```
+
+## Regression testing
+
+SeaGuard also uses regression testing for architectural behaviours that are easy to accidentally break.
+
+A major example is the distinction between:
+
+```text
+CURRENT
+```
+
+and:
+
+```text
+HISTORICAL
+```
+
+The Current dashboard must use:
+
+- active vessels only;
+- current collision encounters only;
+- risk assessments inside the active AIS window;
+- anomalies inside the active AIS window.
+
+Historical playback must continue to expose historical:
+
+- vessels;
+- anomalies;
+- hybrid-risk evidence;
+- collision encounters.
+
+This behaviour was explicitly tested while completing Milestone 10.
+
+For example, anomaly-window verification confirmed that the same persisted anomaly data behaves differently depending on the configured AIS watermark window:
+
+```text
+15-minute active window → 0 current anomalies
+31-minute active window → 5 matching anomalies
+```
+
+This demonstrated that Current-mode filtering is driven by the AIS watermark rather than by deleting or hiding historical data globally.
+
+## Backend quality gate
+
+Before completing a milestone or committing a major feature, the backend is checked with:
+
+```bash
+cd backend
+
+uv run ruff format .
+uv run ruff check .
+uv run pytest -v
+```
+
+This verifies:
+
+- formatting;
+- linting;
+- Python correctness;
+- unit/integration regression coverage.
+
+## Frontend quality gate
+
+The frontend is validated with:
+
+```bash
+cd frontend
+
+npm run build
+npm run lint
+```
+
+This catches:
+
+- TypeScript errors;
+- invalid imports/exports;
+- broken API-client contracts;
+- build regressions;
+- lint violations.
+
+This became especially valuable during the Current-mode work, where a regression in `frontend/src/api/client.ts` was caught because the frontend build failed when risk API exports were accidentally removed.
+
+## Manual operational verification
+
+Automated tests are supplemented with focused manual verification of the running system.
+
+Typical acceptance checks include:
+
+```text
+Current dashboard
+├── active vessels only
+├── current collisions only
+├── current risk only
+└── current anomalies only
+
+Historical playback
+├── historical vessels
+├── historical anomalies
+├── historical risk
+└── historical collisions
+```
+
+API responses are also checked directly during development using `curl` so that backend behaviour can be validated independently of the React UI.
+
+This combination of:
+
+```text
+pytest
++
+Ruff
++
+TypeScript build
++
+frontend linting
++
+API verification
++
+browser regression checks
+```
+
+is the project's current quality strategy.
+
+The goal is to keep SeaGuard reliable as the system grows from a portfolio project into a more sophisticated maritime intelligence platform.
+
+---
+
 # Development Quality Checks
 
 ## Backend
@@ -1108,6 +1281,7 @@ Hybrid risk exposes rule evidence, ML percentile, detector agreement, and reason
 Five-second polling is sufficient for the current v1 architecture.
 
 WebSockets or SSE are deliberately deferred until push-based transport provides a clear operational benefit.
+
 
 ---
 
